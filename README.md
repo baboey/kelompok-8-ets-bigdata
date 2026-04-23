@@ -8,14 +8,6 @@
 | 5027241039 | Rayka Dharma Pranandita | |
 | 5027241044 | Rizqi Akbar | |
 
-## Tasklist Readme.md
-- [ ] Nama anggota kelompok + kontribusi masing-masing
-- [ ] Topik yang dipilih + justifikasi singkat (mengapa menarik)
-- [ ] Diagram arsitektur (boleh gambar tangan yang difoto / draw.io)
-- [ ] Cara menjalankan sistem step-by-step
-- [ ] Screenshot: HDFS Web UI + Kafka consumer output + Dashboard berjalan
-- [ ] Tantangan terbesar yang dihadapi dan cara mengatasinya
-
 ## Timeline
 | Hari | Target |
 | --- | --- |
@@ -29,6 +21,42 @@
 | 13 |	Testing end-to-end, perbaikan, finalisasi README |
 | 14 |	Deadline: Submit link GitHub ke LMS, persiapan demo |
 
+## Checklist Demo
+#### KAFKA:
+- [ ] docker compose (Kafka) berjalan — kafka-broker aktif
+- [ ] kafka-topics.sh --list menampilkan 2 topic [tema]-api dan [tema]-rss
+- [ ] producer_api.py berjalan dan output event terlihat di terminal
+- [ ] producer_rss.py berjalan dan output artikel terlihat di terminal
+- [ ] consumer_to_hdfs.py berjalan
+- [ ] kafka-consumer-groups.sh --describe menampilkan consumer group
+
+#### HDFS:
+- [ ] docker compose (Hadoop) berjalan — 4 container aktif
+- [ ] hdfs dfs -ls /data/[tema]/api/ menampilkan file JSON
+- [ ] hdfs dfs -ls /data/[tema]/rss/ menampilkan file JSON
+- [ ] Screenshot HDFS Web UI (localhost:9870) ada di README
+
+#### SPARK:
+- [ ] Analisis 1 berjalan tanpa error dari HDFS
+- [ ] Analisis 2 berjalan (Spark SQL)
+- [ ] Analisis 3 berjalan
+- [ ] hdfs dfs -ls /data/[tema]/hasil/ menampilkan output Spark
+- [ ] dashboard/data/spark_results.json ada
+
+#### DASHBOARD:
+- [ ] python dashboard/app.py berjalan
+- [ ] localhost:5000 bisa dibuka di browser
+- [ ] Panel data Spark menampilkan data nyata (bukan placeholder)
+- [ ] Panel data live menampilkan event terbaru
+- [ ] Panel berita menampilkan artikel terbaru
+- [ ] Auto-refresh terbukti berjalan
+
+#### REPOSITORY:
+- [X] GitHub repo public
+- [ ] Semua file kode ada (tidak ada file yang "lupa di-push")
+- [ ] README berisi nama anggota + kontribusi + cara menjalankan + screenshot
+- [ ] Link repository sudah dikirim ke LMS sebelum deadline
+
 ----
 
 # Topik 08 - 🛒 HargaPangan: Monitor Harga Komoditas Bahan Pokok 
@@ -38,4 +66,6 @@
 
 ## Step-by-Step
 
-## Tantangan Terbesar
+__Screenshot: HDFS Web UI + Kafka consumer output + Dashboard berjalan__
+
+## Tantangan Terbesar dan Mitigasinya
