@@ -3,10 +3,10 @@
 ## Keanggotaan Kelompok 08
 | NRP | Nama | Kontribusi |
 | --- | --- | --- |
-| 5027231007 | Thio Billy | | 
-| 5027241026 | Evan Christian Nainggolan | | 
-| 5027241039 | Rayka Dharma Pranandita | |
-| 5027241044 | Rizqi Akbar | |
+| 5027231007 | Billy | | 
+| 5027241026 | Evan | | 
+| 5027241039 | Rayka  | |
+| 5027241044 | Akbar | |
 
 ## Timeline
 | Hari | Target |
