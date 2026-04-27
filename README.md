@@ -4,10 +4,10 @@
 ### Keanggotaan Kelompok 08
 | NRP | Nama | Kontribusi |
 | --- | --- | --- |
-| 5027231007 | Thio Billy | | 
-| 5027241026 | Evan Christian Nainggolan  | | 
-| 5027241039 | Rayka Dharma Pranandita  | |
-| 5027241044 | Rizqi Akbar | |
+| 5027231007 | Thio Billy | Producer API (Simulator Harga) | 
+| 5027241026 | Evan Christian Nainggolan | Spark Analysis | 
+| 5027241039 | Rayka Dharma Pranandita  | DevOps + Dashboard (Lead/Koordinator) |
+| 5027241044 | Rizqi Akbar | Producer RSS + Consumer HDFS |
 
 ----
 
