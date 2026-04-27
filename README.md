@@ -5,13 +5,13 @@
 ---
 
 ## 👥 Anggota Tim
+| NRP | Nama | Peran |
+| --- |------|-------| 
+| 5027231007 | **Thio Billy** | Producer API |
+| 5027241026 | **Evan Christian Nainggolan** | Spark Analysis |
+| 5027241039 | **Rayka Dharma Pranandita** | DevOps + Dashboard |
+| 5027241044 | **Rizqi Akbar** | Producer RSS + Consumer |
 
-| Nama | Peran | Tanggung Jawab |
-|------|-------|----------------|
-| **Rayka** | DevOps + Dashboard (Lead) | Docker Compose, infrastruktur, Flask dashboard, README |
-| **Billy** | Producer API | `kafka/producer_api.py` — simulator harga komoditas |
-| **Akbar** | Producer RSS + Consumer | `kafka/producer_rss.py`, `kafka/consumer_to_hdfs.py` |
-| **Evan** | Spark Analysis | `spark/analysis.py` — 3 analisis wajib + bonus MLlib |
 
 ---
 
