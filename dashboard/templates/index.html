@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HargaPangan Monitor — Big Data Pipeline Dashboard</title>
+  <meta name="description" content="Dashboard real-time monitoring harga komoditas bahan pokok Indonesia menggunakan Big Data Pipeline (Kafka, HDFS, Spark).">
+
+  <!-- Fonts & Chart.js -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══════════════════════════════════════════════════════════════ -->
+<header>
+  <div class="header-brand">
+    <span class="logo">🌾</span>
+    <div>
+      <h1>HargaPangan Monitor</h1>
+      <p>Big Data Pipeline — Kafka · HDFS · Spark · Flask</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="status-badge">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-text">Live</span>
+    </div>
+    <span id="last-update">Memuat...</span>
+  </div>
+</header>
+
+<!-- ═══ MAIN DASHBOARD ════════════════════════════════════════════════════════ -->
+<main>
+
+  <!-- Panel 1: Harga Terkini (Full Width) -->
+  <div class="card card-full" id="panel-harga">
+    <div class="card-title">
+      <span class="icon">💹</span>
+      Harga Komoditas Terkini
+      <span style="margin-left:auto;font-size:0.72rem;color:var(--text-dim)">Auto-refresh 30 detik</span>
+    </div>
+    <div class="harga-grid" id="harga-grid">
+      <div class="loading-text"><div class="spinner"></div> Memuat data harga...</div>
+    </div>
+  </div>
+
+  <!-- Panel 2: Tren Harga (Chart.js Line) -->
+  <div class="card">
+    <div class="card-title">
+      <span class="icon">📈</span>
+      Tren Harga per Periode
+      <span style="margin-left:auto;font-size:0.72rem;color:var(--text-dim)">Spark SQL Analysis</span>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="chart-tren"></canvas>
+    </div>
+  </div>
+
+  <!-- Panel 3: Volatilitas Harga -->
+  <div class="card">
+    <div class="card-title">
+      <span class="icon">⚡</span>
+      Ranking Volatilitas Harga
+      <span style="margin-left:auto;font-size:0.72rem;color:var(--text-dim)">Spark DataFrame API</span>
+    </div>
+    <div class="vol-list" id="vol-list">
+      <div class="loading-text"><div class="spinner"></div> Memuat...</div>
+    </div>
+  </div>
+
+  <!-- Panel 4: Berita RSS -->
+  <div class="card">
+    <div class="card-title">
+      <span class="icon">📰</span>
+      Berita Ekonomi Pangan
+      <span style="margin-left:auto;font-size:0.72rem;color:var(--text-dim)">RSS Feed Live</span>
+    </div>
+    <div class="news-list" id="news-list">
+      <div class="loading-text"><div class="spinner"></div> Memuat berita...</div>
+    </div>
+  </div>
+
+  <!-- Panel 5: Korelasi Berita-Harga -->
+  <div class="card">
+    <div class="card-title">
+      <span class="icon">🔗</span>
+      Korelasi Berita ↔ Harga
+      <span style="margin-left:auto;font-size:0.72rem;color:var(--text-dim)">Analisis 3</span>
+    </div>
+    <div class="table-wrapper">
+      <table id="table-korelasi">
+        <thead>
+          <tr>
+            <th>Komoditas</th>
+            <th>Frekuensi Berita</th>
+            <th>Rata-rata Perubahan</th>
+          </tr>
+        </thead>
+        <tbody id="tbody-korelasi">
+          <tr><td colspan="3" class="loading-text"><div class="spinner"></div> Memuat...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Panel 6: Prediksi MLlib (Bonus) -->
+  <div class="card card-full" id="panel-mlllib">
+    <div class="card-title">
+      <span class="icon">🤖</span>
+      Prediksi Tren Harga — MLlib Linear Regression
+      <span style="margin-left:auto;">
+        <span class="badge badge-purple" style="background:rgba(188,140,255,0.15);color:var(--accent-purple)">Bonus +5 poin</span>
+      </span>
+    </div>
+    <div id="mlllib-container">
+      <div class="loading-text"><div class="spinner"></div> Memuat hasil MLlib...</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══ JAVASCRIPT ════════════════════════════════════════════════════════════ -->
+<script>
+// ── Konstanta ──────────────────────────────────────────────────────────────
+const REFRESH_INTERVAL = 30_000;  // 30 detik
+const KOMODITAS_EMOJI  = {
+  beras: '🌾', jagung: '🌽', kedelai: '🫘', gula_pasir: '🍬',
+  minyak_goreng: '🫙', cabai_merah: '🌶️', bawang_merah: '🧅', telur_ayam: '🥚',
+};
+
+// ── State charts ───────────────────────────────────────────────────────────
+let chartTren = null;
+
+// ── Format Rupiah ───────────────────────────────────────────────────────────
+function fmtRupiah(n) {
+  return 'Rp ' + Math.round(n).toLocaleString('id-ID');
+}
+
+function timeAgo(isoStr) {
+  const diff = (Date.now() - new Date(isoStr).getTime()) / 1000;
+  if (diff < 60)   return `${Math.floor(diff)}d lalu`;
+  if (diff < 3600) return `${Math.floor(diff/60)}m lalu`;
+  return `${Math.floor(diff/3600)}j lalu`;
+}
+
+// ── Panel 1: Harga Terkini ──────────────────────────────────────────────────
+function renderHarga(terkini) {
+  const grid = document.getElementById('harga-grid');
+  if (!terkini || Object.keys(terkini).length === 0) {
+    grid.innerHTML = '<div class="loading-text">Menunggu data dari Kafka producer...</div>';
+    return;
+  }
+
+  const prevPrices = {};
+  grid.querySelectorAll('.harga-item').forEach(el => {
+    prevPrices[el.dataset.com] = parseInt(el.dataset.price || '0');
+  });
+
+  grid.innerHTML = Object.entries(terkini).map(([com, d]) => {
+    const emoji  = KOMODITAS_EMOJI[com] || '📦';
+    const nama   = com.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const arrow  = d.trend === 'naik' ? '▲' : (d.trend === 'turun' ? '▼' : '─');
+    const pct    = (d.change_pct >= 0 ? '+' : '') + d.change_pct.toFixed(2) + '%';
+    const prev   = prevPrices[com];
+    const flash  = prev && d.price > prev ? 'flash-naik' : (prev && d.price < prev ? 'flash-turun' : '');
+
+    return `
+      <div class="harga-item ${d.trend} ${flash}" data-com="${com}" data-price="${d.price}">
+        <div class="harga-nama">${emoji} ${nama}</div>
+        <div class="harga-nilai">${fmtRupiah(d.price)}</div>
+        <div class="harga-change ${d.trend}">${arrow} ${pct}</div>
+        <div class="harga-region">${d.region || ''}</div>
+      </div>`;
+  }).join('');
+}
+
+// ── Panel 2: Tren Harga ─────────────────────────────────────────────────────
+function renderTren(trenData) {
+  const canvas = document.getElementById('chart-tren');
+  if (!trenData || trenData.length === 0) return;
+
+  const komoditas = [...new Set(trenData.map(r => r.commodity))].slice(0, 4);
+  const periods   = [...new Set(trenData.map(r => r.periode))].sort().slice(-12);
+
+  const COLORS = ['#3fb950','#58a6ff','#d29922','#f85149','#bc8cff'];
+  const datasets = komoditas.map((com, i) => ({
+    label: com.replace(/_/g, ' '),
+    data: periods.map(p => {
+      const row = trenData.find(r => r.commodity === com && r.periode === p);
+      return row ? row.harga_rata : null;
+    }),
+    borderColor: COLORS[i % COLORS.length],
+    backgroundColor: COLORS[i % COLORS.length] + '20',
+    fill: false,
+    tension: 0.4,
+    borderWidth: 2,
+    pointRadius: 3,
+    spanGaps: true,
+  }));
+
+  const cfg = {
+    type: 'line',
+    data: { labels: periods.map(p => p.slice(11) || p), datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: { color: '#7d8590', font: { size: 11 }, boxWidth: 12 }
+        },
+        tooltip: {
+          backgroundColor: '#161b22',
+          borderColor: 'rgba(255,255,255,0.1)',
+          borderWidth: 1,
+          callbacks: {
+            label: ctx => ` ${ctx.dataset.label}: ${fmtRupiah(ctx.parsed.y)}`
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#7d8590', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#7d8590', font: { size: 10 }, callback: v => 'Rp ' + (v/1000).toFixed(0) + 'k' }, grid: { color: 'rgba(255,255,255,0.04)' } },
+      }
+    }
+  };
+
+  if (chartTren) chartTren.destroy();
+  chartTren = new Chart(canvas, cfg);
+}
+
+// ── Panel 3: Volatilitas ─────────────────────────────────────────────────────
+function renderVolatilitas(data) {
+  const container = document.getElementById('vol-list');
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="loading-text">Belum ada data Spark...</div>';
+    return;
+  }
+
+  const maxVol = Math.max(...data.map(d => d.volatilitas_pct || 0));
+  container.innerHTML = data.map(d => {
+    const pct  = d.volatilitas_pct || 0;
+    const nama = (d.commodity || '').replace(/_/g, ' ');
+    const w    = maxVol > 0 ? (pct / maxVol * 100).toFixed(1) : 0;
+    return `
+      <div class="vol-item">
+        <span class="vol-name">${nama}</span>
+        <div class="vol-bar-track"><div class="vol-bar-fill" style="width:${w}%"></div></div>
+        <span class="vol-pct">${pct.toFixed(1)}%</span>
+      </div>`;
+  }).join('');
+}
+
+// ── Panel 4: Berita RSS ──────────────────────────────────────────────────────
+function renderBerita(articles) {
+  const container = document.getElementById('news-list');
+  if (!articles || articles.length === 0) {
+    container.innerHTML = '<div class="loading-text">Menunggu berita dari RSS producer...</div>';
+    return;
+  }
+
+  container.innerHTML = articles.slice().reverse().map(a => `
+    <a class="news-item" href="${a.link || '#'}" target="_blank" rel="noopener">
+      <div class="news-title">${a.title || '(Tanpa judul)'}</div>
+      <div class="news-meta">
+        <span class="news-source">${a.source || ''}</span>
+        <span>${a.published ? new Date(a.published).toLocaleDateString('id-ID') : ''}</span>
+      </div>
+    </a>`).join('');
+}
+
+// ── Panel 5: Korelasi ────────────────────────────────────────────────────────
+function renderKorelasi(data) {
+  const tbody = document.getElementById('tbody-korelasi');
+  if (!data || data.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" class="loading-text">Belum ada data Spark...</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = data.map(r => {
+    const chg   = r.avg_change_pct || 0;
+    const cls   = chg > 0 ? 'badge-green' : (chg < 0 ? 'badge-red' : 'badge-blue');
+    const arrow = chg > 0 ? '▲' : (chg < 0 ? '▼' : '─');
+    return `
+      <tr>
+        <td>${(r.komoditas||'').replace(/_/g,' ')}</td>
+        <td><span class="badge badge-blue">${r.frekuensi_berita || 0} artikel</span></td>
+        <td><span class="badge ${cls}">${arrow} ${Math.abs(chg).toFixed(2)}%</span></td>
+      </tr>`;
+  }).join('');
+}
+
+// ── Panel 6: MLlib ───────────────────────────────────────────────────────────
+function renderMLlib(prediksi) {
+  const container = document.getElementById('mlllib-container');
+  if (!prediksi) {
+    container.innerHTML = '<div class="loading-text">Jalankan spark/analysis.py untuk melihat prediksi...</div>';
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="mlllib-grid">
+      <div class="ml-stat">
+        <div class="ml-stat-value">${prediksi.koefisien > 0 ? '+' : ''}${prediksi.koefisien}</div>
+        <div class="ml-stat-label">Koefisien (slope)</div>
+      </div>
+      <div class="ml-stat">
+        <div class="ml-stat-value">${fmtRupiah(prediksi.intercept)}</div>
+        <div class="ml-stat-label">Intercept</div>
+      </div>
+      <div class="ml-stat">
+        <div class="ml-stat-value">${(prediksi.r2 * 100).toFixed(1)}%</div>
+        <div class="ml-stat-label">R² Score</div>
+      </div>
+      <div class="ml-stat">
+        <div class="ml-stat-value">${fmtRupiah(prediksi.rmse)}</div>
+        <div class="ml-stat-label">RMSE</div>
+      </div>
+    </div>
+    <div class="ml-interpretasi">💡 ${prediksi.interpretasi || ''} | Komoditas: ${prediksi.komoditas || ''}</div>`;
+}
+
+// ── Fetch Data ───────────────────────────────────────────────────────────────
+async function fetchData() {
+  try {
+    const res  = await fetch('/api/data');
+    const json = await res.json();
+
+    if (json.status !== 'ok') return;
+
+    // Update header
+    document.getElementById('last-update').textContent =
+      'Update: ' + new Date(json.updated).toLocaleTimeString('id-ID');
+
+    // Render semua panel
+    renderHarga(json.prices?.terkini || {});
+    renderBerita(json.news || []);
+
+    const spark = json.spark || {};
+    renderTren(spark.tren_harga || []);
+    renderVolatilitas(spark.volatilitas || []);
+    renderKorelasi(spark.korelasi_berita || []);
+    renderMLlib(spark.prediksi_mlllib || null);
+
+    // Status dot hijau
+    document.getElementById('status-dot').style.background = 'var(--accent-green)';
+    document.getElementById('status-text').textContent = 'Live';
+
+  } catch (err) {
+    console.warn('Fetch error:', err);
+    document.getElementById('status-dot').style.background = 'var(--accent-yellow)';
+    document.getElementById('status-text').textContent = 'Offline';
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  fetchData();
+  setInterval(fetchData, REFRESH_INTERVAL);
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,70 @@
+
+# ============================================================
+# HargaPangan — Apache Kafka (KRaft Mode, tanpa Zookeeper)
+# Referensi: Materi Pertemuan 8 — Apache Kafka
+# Image: apache/kafka:3.9.0 (sesuai materi dosen)
+# Jalankan: docker compose -f docker-compose-kafka.yml up -d
+# ============================================================
+
+services:
+
+  # ── Kafka Broker (KRaft Mode) ───────────────────────────
+  kafka-broker:
+    image: apache/kafka:3.9.0
+    container_name: kafka-broker
+    restart: unless-stopped
+    ports:
+      - "9092:9092"   # Akses dari host machine (producer/consumer Python)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Listeners: EXTERNAL untuk host, INTERNAL untuk Docker network
+      KAFKA_LISTENERS: EXTERNAL://:9092,INTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9092,INTERNAL://kafka-broker:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-broker:9093
+      # Konfigurasi topic & retention
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_HOURS: 168      # 7 hari
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - bigdata-net
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --list --bootstrap-server localhost:9092 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
+  # ── Kafka UI (Provectus) — Monitoring Visual ─────────────
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # Kafka Web UI
+    environment:
+      KAFKA_CLUSTERS_0_NAME: hargapangan-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-broker:9094
+      KAFKA_CLUSTERS_0_READONLY: "false"
+    networks:
+      - bigdata-net
+    depends_on:
+      - kafka-broker
+
+volumes:
+  kafka_data:
+
+networks:
+  bigdata-net:
+    name: bigdata-net
+    driver: bridge
