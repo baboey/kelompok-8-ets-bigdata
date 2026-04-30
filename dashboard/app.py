@@ -41,18 +41,23 @@ def baca_json(filepath: str, default=None):
 def harga_terkini(data_list: list) -> dict:
     """
     Dari list events harga, ambil harga terkini per komoditas.
-    Return dict: {commodity: {price, trend, change_pct, timestamp}}
+    Return dict: {komoditas: {harga, perubahan_persen, kota, timestamp}}
     """
     terkini = {}
     for item in data_list:
-        com = item.get("commodity", "")
+        com = item.get("komoditas", "")
         if com:
+            # Tentukan trend berdasarkan perubahan_persen
+            pct = item.get("perubahan_persen", 0)
+            trend = "📈 naik" if pct > 0.3 else ("📉 turun" if pct < -0.3 else "➡️ stabil")
+            
             terkini[com] = {
-                "price":      item.get("price", 0),
-                "trend":      item.get("trend", "stabil"),
-                "change_pct": item.get("change_pct", 0.0),
-                "region":     item.get("region", ""),
-                "timestamp":  item.get("timestamp", ""),
+                "harga":                item.get("harga", 0),
+                "perubahan_persen":     item.get("perubahan_persen", 0.0),
+                "trend":                trend,
+                "kota":                 item.get("kota", ""),
+                "timestamp":            item.get("timestamp", ""),
+                "harga_baseline":       item.get("harga_baseline", 0),
             }
     return terkini
 
