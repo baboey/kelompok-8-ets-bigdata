@@ -1,83 +1,72 @@
-# 🌾 HargaPangan Monitor — Big Data Pipeline
+# HargaPangan Monitor — Big Data Pipeline
 
-> **ETS Mata Kuliah Big Data** | Sistem monitoring harga komoditas bahan pokok Indonesia menggunakan arsitektur Big Data end-to-end.
+**ETS Mata Kuliah Big Data** | Sistem monitoring harga komoditas bahan pokok Indonesia menggunakan arsitektur Big Data end-to-end.
 
 ---
 
-## 👥 Anggota Tim
+## Anggota Tim
 | NRP | Nama | Peran |
 | --- |------|-------| 
-| 5027231007 | **Thio Billy** | Producer API |
-| 5027241026 | **Evan Christian Nainggolan** | Spark Analysis |
-| 5027241039 | **Rayka Dharma Pranandita** | DevOps + Dashboard |
-| 5027241044 | **Rizqi Akbar** | Producer RSS + Consumer |
-
+| 5027231007 | Thio Billy | Producer API |
+| 5027241026 | Evan Christian Nainggolan | Spark Analysis |
+| 5027241039 | Rayka Dharma Pranandita | DevOps + Dashboard |
+| 5027241044 | Rizqi Akbar | Producer RSS + Consumer |
 
 ---
 
-## 📋 Topik & Justifikasi
+## Topik & Justifikasi
 
 **Topik:** HargaPangan — Monitor Harga Komoditas Bahan Pokok Indonesia
 
 **Pertanyaan Bisnis:**
-> *"Komoditas mana yang paling bergejolak harganya hari ini, dan apakah ada berita ekonomi yang menjelaskan penyebabnya?"*
+"Komoditas mana yang paling bergejolak harganya hari ini, dan apakah ada berita ekonomi yang menjelaskan penyebabnya?"
 
 **Justifikasi sumber data:**
-- Producer API menggunakan **simulator realistis** dengan model *random walk* berbasis harga pasar riil Indonesia (April 2026), karena API harga pangan publik tidak menyediakan endpoint yang stabil dan terdokumentasi untuk akses programatik.
-- Producer RSS menggunakan feed **Bisnis.com** dan **Kompas.com** (ekonomi/money) sebagai sumber berita pangan real-time.
+- Producer API menggunakan simulator realistis dengan model random walk berbasis harga pasar riil Indonesia (April 2026). Hal ini dilakukan karena API harga pangan publik tidak menyediakan endpoint yang stabil dan terdokumentasi untuk akses terprogram.
+- Producer RSS menggunakan feed Bisnis.com dan Kompas.com (kategori ekonomi/money) sebagai sumber berita pangan secara real-time.
 
 ---
 
-## 🏗️ Arsitektur Sistem
+## Arsitektur Sistem
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                      PRODUCERS                          │
-│  producer_api.py          producer_rss.py               │
-│  (Simulator Harga)        (RSS Bisnis.com)               │
-│       │                        │                        │
-│       ▼ topic: pangan-api      ▼ topic: pangan-rss      │
-└───────────────────┬────────────┴────────────────────────┘
-                    │
-          ┌─────────▼──────────┐
-          │   Apache Kafka     │
-          │   (KRaft Mode)     │
-          │   localhost:9092   │
-          └─────────┬──────────┘
-                    │
-          ┌─────────▼──────────┐
-          │ consumer_to_hdfs   │
-          │  Buffer 2 menit    │
-          └──────┬──────┬──────┘
-                 │      │
-        ┌────────▼┐    ┌▼─────────────┐
-        │  HDFS   │    │  Local JSON  │
-        │/data/   │    │ dashboard/   │
-        │pangan/  │    │ data/*.json  │
-        └────────┬┘    └─────────┬────┘
-                 │               │
-        ┌────────▼──────┐        │
-        │ Spark Analysis│        │
-        │ analysis.py   │        │
-        └────────┬──────┘        │
-                 │               │
-        ┌────────▼───────────────▼────┐
-        │     Flask Dashboard         │
-        │     localhost:5000          │
-        └─────────────────────────────┘
+Alur data dalam pipeline:
+1. Producer menghasilkan data dan mengirimkannya ke Kafka.
+2. Consumer membaca dari Kafka dan secara real-time menulis ke file JSON lokal agar dapat dibaca langsung oleh Dashboard.
+3. Consumer juga melakukan batching data dan menyimpannya ke HDFS.
+4. Spark memproses data batch dari HDFS untuk menghasilkan analitik.
+5. Dashboard membaca file JSON lokal (real-time data) dan hasil analisis Spark.
+
+```text
+  PRODUCERS (pipeline/producer_api.py, pipeline/producer_rss.py)
+       |
+       v
+  Apache Kafka (KRaft Mode, localhost:9092)
+       |
+       v
+  Consumer (pipeline/consumer_to_hdfs.py)
+       |--------------------------------\
+       v                                v
+  HDFS (Batch per N pesan)      Local JSON (Real-time update)
+       |                                |
+       v                                |
+  Spark Analysis (spark/analysis.py)    |
+       |                                |
+       v                                |
+  Flask Dashboard (dashboard/app.py) <--/
 ```
 
 ---
 
-## 🚀 Cara Menjalankan
+## Cara Menjalankan
 
 ### Prasyarat
-
 - Docker Desktop (min. RAM 6GB dialokasikan)
-- Python 3.9+
+- Python 3.12 atau yang lebih baru
 - pip
 
 ### 1. Install Python Dependencies
+
+Sistem menggunakan `kafka-python-ng` untuk kompatibilitas dengan Python versi terbaru.
 
 ```bash
 pip install -r requirements.txt
@@ -90,20 +79,15 @@ docker compose -f docker-compose-hadoop.yml up -d
 ```
 
 Verifikasi:
-```bash
-# HDFS Web UI
-http://localhost:9870
-
-# Cek namenode running
-docker ps | grep namenode
-```
+- HDFS Web UI: http://localhost:9870
+- Pastikan container namenode berjalan: `docker ps | findstr namenode`
 
 Buat direktori HDFS untuk data:
 ```bash
 docker exec namenode hdfs dfs -mkdir -p /data/pangan/api
 docker exec namenode hdfs dfs -mkdir -p /data/pangan/rss
 docker exec namenode hdfs dfs -mkdir -p /data/pangan/hasil
-docker exec namenode hdfs dfs -chmod 777 /data/pangan
+docker exec namenode hdfs dfs -chmod -R 777 /data/pangan
 ```
 
 ### 3. Start Kafka
@@ -113,61 +97,52 @@ docker compose -f docker-compose-kafka.yml up -d
 ```
 
 Verifikasi:
+- Kafka UI: http://localhost:8080
+- Pastikan broker berjalan: `docker ps | findstr kafka-broker`
+
+### 4. Jalankan Pipeline (di terminal terpisah)
+
+Karena sistem berjalan secara terus-menerus, buka terminal baru untuk masing-masing perintah berikut:
+
+**Terminal 1 — Consumer HDFS:**
 ```bash
-# Kafka UI
-http://localhost:8080
-
-# Cek broker running
-docker ps | grep kafka-broker
-
-# Cek topics (setelah producer jalan)
-docker exec kafka-broker kafka-topics.sh --list --bootstrap-server localhost:9092
+$env:PYTHONUTF8=1; python pipeline/consumer_to_hdfs.py
 ```
 
-### 4. Jalankan Producers (di terminal terpisah)
-
-**Terminal 1 — Producer API (Billy):**
+**Terminal 2 — Producer API:**
 ```bash
-python kafka/producer_api.py
+$env:PYTHONUTF8=1; python pipeline/producer_api.py
 ```
 
-**Terminal 2 — Producer RSS (Akbar):**
+**Terminal 3 — Producer RSS:**
 ```bash
-python kafka/producer_rss.py
+$env:PYTHONUTF8=1; python pipeline/producer_rss.py
 ```
 
-### 5. Jalankan Consumer HDFS (Akbar)
+*(Catatan: flag `$env:PYTHONUTF8=1` ditambahkan khusus untuk Windows PowerShell agar tidak terjadi error Unicode)*
 
-**Terminal 3:**
+### 5. Jalankan Spark Analysis
+
+Tunggu beberapa saat hingga data terkumpul di HDFS dari consumer, kemudian jalankan:
 ```bash
-python kafka/consumer_to_hdfs.py
-```
-
-### 6. Jalankan Spark Analysis (Evan)
-
-Tunggu beberapa menit hingga data terkumpul di HDFS, lalu:
-```bash
-# Jika PySpark terinstall di host
 python spark/analysis.py
-
-# Atau via spark-submit
-spark-submit --master local[*] spark/analysis.py
 ```
+*(Catatan: Proses ini dapat dijalankan secara berkala untuk memperbarui hasil analitik)*
 
-### 7. Jalankan Flask Dashboard (Rayka)
+### 6. Jalankan Flask Dashboard
 
 **Terminal 4:**
 ```bash
 python dashboard/app.py
 ```
 
-Buka browser: **http://localhost:5000**
+Buka browser dan akses: **http://localhost:5000**
 
 ---
 
-## 📁 Struktur Proyek
+## Struktur Proyek
 
-```
+```text
 ets/
 ├── hadoop.env                    # Konfigurasi Hadoop environment
 ├── docker-compose-hadoop.yml     # Hadoop HDFS/YARN (4 container)
@@ -175,140 +150,88 @@ ets/
 ├── requirements.txt              # Python dependencies
 ├── .gitignore
 │
-├── kafka/
+├── pipeline/
 │   ├── producer_api.py           # Simulator harga komoditas (Billy)
 │   ├── producer_rss.py           # RSS feed reader (Akbar)
-│   └── consumer_to_hdfs.py      # Consumer → HDFS (Akbar)
+│   └── consumer_to_hdfs.py       # Consumer -> HDFS & Local JSON (Akbar)
 │
 ├── spark/
-│   └── analysis.py              # 3 analisis + MLlib bonus (Evan)
+│   └── analysis.py               # Analisis Spark & MLlib (Evan)
 │
 └── dashboard/
-    ├── app.py                   # Flask backend (Rayka)
-    ├── templates/index.html     # Dashboard UI
-    ├── static/style.css         # Dark theme CSS
-    └── data/                   # Runtime data (di-gitignore)
-        ├── live_api.json        # 50 harga terakhir dari Kafka
-        ├── live_rss.json        # 20 berita terakhir dari Kafka
-        └── spark_results.json  # Hasil analisis Spark
+    ├── app.py                    # Flask backend (Rayka)
+    ├── templates/index.html      # Dashboard UI
+    ├── static/style.css          # CSS Styling
+    └── data/                     # Runtime data (di-gitignore)
+        ├── live_api.json         # Data real-time harga
+        ├── live_rss.json         # Data real-time berita
+        └── spark_results.json    # Hasil analisis Spark
 ```
 
 ---
 
-## 🔌 Port & Services
+## Port & Services
 
-| Service | URL | Keterangan |
-|---------|-----|------------|
+| Service | URL / Port | Keterangan |
+|---------|------------|------------|
 | HDFS Web UI | http://localhost:9870 | Monitor HDFS, browse files |
 | YARN ResourceManager | http://localhost:8088 | Monitor jobs YARN |
 | Kafka UI | http://localhost:8080 | Monitor topics & consumer groups |
 | Flask Dashboard | http://localhost:5000 | Dashboard utama |
 | Kafka Broker | localhost:9092 | Endpoint untuk producer/consumer |
-| HDFS RPC | localhost:8020 | Endpoint untuk koneksi Spark/Python |
+| HDFS RPC | localhost:8020 | Endpoint koneksi Spark/Python ke HDFS |
 
 ---
 
-## 📊 Kafka Topics
+## Kafka Topics
 
-| Topic | Producer | Consumer | Isi |
-|-------|----------|----------|-----|
-| `pangan-api` | `producer_api.py` | `consumer_to_hdfs.py` | Data harga komoditas (JSON per event) |
-| `pangan-rss` | `producer_rss.py` | `consumer_to_hdfs.py` | Artikel berita ekonomi (JSON per artikel) |
-
-**Contoh payload `pangan-api`:**
-```json
-{
-  "commodity": "beras",
-  "price": 13500,
-  "unit": "kg",
-  "region": "Jakarta",
-  "timestamp": "2026-04-27T14:00:00+07:00",
-  "source": "simulator",
-  "change": 100,
-  "change_pct": 0.75,
-  "trend": "naik"
-}
-```
-
-**Contoh payload `pangan-rss`:**
-```json
-{
-  "title": "Harga Beras Naik Jelang Ramadan",
-  "link": "https://bisnis.com/...",
-  "summary": "Kenaikan harga beras...",
-  "published": "2026-04-27T10:00:00",
-  "source": "bisnis.com",
-  "timestamp": "2026-04-27T14:05:00+07:00"
-}
-```
+| Topic | Producer | Consumer | Format Isi |
+|-------|----------|----------|------------|
+| pangan-api | producer_api.py | consumer_to_hdfs.py | Data harga komoditas (JSON) |
+| pangan-rss | producer_rss.py | consumer_to_hdfs.py | Artikel berita (JSON) |
 
 ---
 
-## 🔥 Analisis Spark (3 Wajib + 1 Bonus)
+## Analisis Spark
 
-| # | Analisis | API Spark | Output |
-|---|----------|-----------|--------|
-| 1 | **Volatilitas Harga** — ranking komoditas paling bergejolak | DataFrame API (`groupBy`, `agg`) | `volatilitas_pct` per komoditas |
-| 2 | **Tren Harga per Periode** — rata-rata harga per jam | Spark SQL (`CREATE TEMP VIEW`, `SELECT AVG`) | Time-series per komoditas |
-| 3 | **Korelasi Berita-Harga** — frekuensi sebutan komoditas di RSS vs perubahan harga | DataFrame + cross-reference | Tabel korelasi |
-| 🎁 | **Prediksi Tren** — Linear Regression harga beras | MLlib Pipeline (`VectorAssembler`, `LinearRegression`) | Koefisien, R², RMSE |
+Terdapat tiga jenis analisis utama dan satu fitur tambahan prediksi menggunakan MLlib.
 
----
-
-## 🖥️ Dashboard — Panel
-
-| Panel | Data Sumber | Fitur |
-|-------|------------|-------|
-| 💹 Harga Terkini | `live_api.json` | 8 komoditas, indikator ▲/▼, flash animasi saat update |
-| 📈 Tren Harga | `spark_results.json` | Line chart Chart.js, multi-komoditas |
-| ⚡ Volatilitas | `spark_results.json` | Bar horizontal, ranking bergejolak |
-| 📰 Berita RSS | `live_rss.json` | 20 artikel terbaru, link ke sumber |
-| 🔗 Korelasi | `spark_results.json` | Tabel frekuensi berita vs perubahan harga |
-| 🤖 MLlib | `spark_results.json` | Koefisien, R², RMSE, interpretasi |
-
-Auto-refresh: **setiap 30 detik**
+1. **Volatilitas Harga:** Menggunakan DataFrame API untuk menghitung dan merangking komoditas yang paling fluktuatif harganya.
+2. **Tren Harga per Periode:** Menggunakan Spark SQL untuk menghitung rata-rata pergerakan harga.
+3. **Korelasi Berita-Harga:** Menggabungkan data DataFrame antara frekuensi sebutan komoditas dalam berita dengan perubahan harga.
+4. **Prediksi Tren (MLlib):** Menggunakan Linear Regression untuk memberikan prediksi pergerakan harga selanjutnya.
 
 ---
 
-## 🛠️ Troubleshooting
+## Dashboard — Panel
 
-**Kafka tidak bisa diakses dari Python:**
-```bash
-# Pastikan broker sudah healthy
-docker ps | grep kafka-broker
-# Cek log
-docker logs kafka-broker --tail 50
-```
+Dashboard membaca data yang diperbarui secara otomatis setiap 30 detik.
 
-**HDFS permission denied:**
-```bash
-docker exec namenode hdfs dfs -chmod -R 777 /data
-```
-
-**Dashboard panel kosong:**
-- Pastikan `consumer_to_hdfs.py` sudah jalan dan ada data di `dashboard/data/`
-- Jalankan `spark/analysis.py` untuk generate `spark_results.json`
-- Cek endpoint: `curl http://localhost:5000/api/status`
-
-**RAM tidak cukup (Docker):**
-- Hadoop butuh minimal 4GB
-- Kafka butuh minimal 1GB
-- Total rekomendasi: **≥ 6GB** untuk Docker Desktop
+- **Harga Terkini:** Membaca live_api.json, menampilkan harga saat ini beserta indikator naik/turun.
+- **Tren Harga:** Membaca spark_results.json, divisualisasikan dalam bentuk line chart.
+- **Volatilitas:** Membaca spark_results.json, divisualisasikan dalam bentuk bar horizontal untuk melihat ranking.
+- **Berita RSS:** Membaca live_rss.json, berisi daftar artikel terbaru beserta tautan ke sumber asli.
+- **Korelasi:** Membaca spark_results.json, menampikan perbandingan tabel berita dan persentase perubahan harga.
+- **MLlib:** Membaca spark_results.json, menampikan nilai koefisien model prediksi.
 
 ---
 
-## 📸 Screenshots
+## Troubleshooting
 
-> *Tambahkan screenshot berikut setelah sistem berjalan:*
-> - [ ] HDFS Web UI — file di `/data/pangan/`
-> - [ ] Kafka UI — topics `pangan-api` dan `pangan-rss`
-> - [ ] Terminal producer berjalan
-> - [ ] Flask Dashboard — semua panel
+1. **Error ModuleNotFoundError: No module named 'kafka'**
+   Pastikan menggunakan module `kafka-python-ng` untuk kompatibilitas versi Python 3.12+. Nama folder producer juga diganti menjadi `pipeline` untuk menghindari bentrokan namespace.
+
+2. **Data tidak muncul di Dashboard**
+   Pastikan consumer berjalan. Consumer akan membuat dan memperbarui file `live_api.json` di dalam folder `dashboard/data/`. 
+   Jalankan `spark/analysis.py` minimal satu kali untuk memunculkan data analitik.
+
+3. **HDFS permission denied**
+   Jalankan perintah berikut untuk membuka akses write ke HDFS:
+   `docker exec namenode hdfs dfs -chmod -R 777 /data`
 
 ---
 
-## ⚠️ Catatan Penting
+## Catatan Tambahan
 
-- File `dashboard/data/*.json` tidak di-commit ke Git (ada di `.gitignore`) — dibuat secara otomatis saat sistem berjalan
-- Consumer menggunakan `group_id="pangan-consumer-group"` — restart consumer akan lanjut dari offset terakhir (tidak ada data yang terlewat)
-- Spark analysis bisa dijalankan berkali-kali — hasilnya akan di-overwrite
+- Direktori `dashboard/data/` berisi file yang dihasilkan saat runtime dan tidak dimasukkan ke dalam version control.
+- Sistem didesain agar tahan terhadap interupsi; jika consumer dihentikan, proses pembacaan pesan Kafka akan dilanjutkan dari offset terakhir tanpa data yang hilang.

@@ -86,7 +86,6 @@ def main():
         bootstrap_servers=['localhost:9092'],
         value_serializer=lambda x: json.dumps(x).encode('utf-8'),
         key_serializer=lambda x: x.encode('utf-8'),
-        enable_idempotence=True,
         acks='all',
         retries=5
     )
