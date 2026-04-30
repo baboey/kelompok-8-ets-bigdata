@@ -12,14 +12,15 @@ Cara menjalankan:
     python consumer_to_hdfs.py
 """
 
-import json, os, threading
+import json, os, threading, time
 from datetime import datetime, timezone, timedelta
 from collections import deque
 from kafka import KafkaConsumer
+from kafka.errors import NoBrokersAvailable
 
 # ─── Konfigurasi ─────────────────────────────────────────────────────────────
 
-KAFKA_BOOTSTRAP  = "localhost:9092"
+KAFKA_BOOTSTRAP  = os.getenv("KAFKA_BOOTSTRAP", "127.0.0.1:9092")
 GROUP_ID         = "pangan-consumer-group"
 HDFS_URL         = "http://localhost:9870"      # NameNode WebHDFS
 HDFS_USER        = "root"
@@ -115,16 +116,27 @@ def update_local_file(filepath: str, data: deque):
 
 def consume_api():
     """Thread consumer untuk topic pangan-api."""
-    consumer = KafkaConsumer(
-        "pangan-api",
-        bootstrap_servers=[KAFKA_BOOTSTRAP],
-        group_id=GROUP_ID,
-        auto_offset_reset="earliest",
-        enable_auto_commit=True,
-        value_deserializer=lambda m: json.loads(m.decode("utf-8")),
-        key_deserializer=lambda k: k.decode("utf-8") if k else None,
-        consumer_timeout_ms=BUFFER_INTERVAL * 1000,
-    )
+    # Retry loop untuk koneksi Kafka
+    consumer = None
+    for i in range(5):
+        try:
+            consumer = KafkaConsumer(
+                "pangan-api",
+                bootstrap_servers=[KAFKA_BOOTSTRAP],
+                group_id=GROUP_ID,
+                auto_offset_reset="earliest",
+                enable_auto_commit=True,
+                value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+                key_deserializer=lambda k: k.decode("utf-8") if k else None,
+                consumer_timeout_ms=BUFFER_INTERVAL * 1000,
+            )
+            print(f"  ✅ [API] Terhubung ke Kafka Broker: {KAFKA_BOOTSTRAP}")
+            break
+        except NoBrokersAvailable:
+            print(f"  ⚠️  [API] Broker {KAFKA_BOOTSTRAP} belum tersedia (retry {i+1}/5)...")
+            time.sleep(5)
+    
+    if not consumer: return
     print("  🟢 Consumer API aktif (topic: pangan-api)")
 
     while True:
@@ -151,16 +163,27 @@ def consume_api():
 
 def consume_rss():
     """Thread consumer untuk topic pangan-rss."""
-    consumer = KafkaConsumer(
-        "pangan-rss",
-        bootstrap_servers=[KAFKA_BOOTSTRAP],
-        group_id=GROUP_ID,
-        auto_offset_reset="earliest",
-        enable_auto_commit=True,
-        value_deserializer=lambda m: json.loads(m.decode("utf-8")),
-        key_deserializer=lambda k: k.decode("utf-8") if k else None,
-        consumer_timeout_ms=BUFFER_INTERVAL * 1000,
-    )
+    # Retry loop untuk koneksi Kafka
+    consumer = None
+    for i in range(5):
+        try:
+            consumer = KafkaConsumer(
+                "pangan-rss",
+                bootstrap_servers=[KAFKA_BOOTSTRAP],
+                group_id=GROUP_ID,
+                auto_offset_reset="earliest",
+                enable_auto_commit=True,
+                value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+                key_deserializer=lambda k: k.decode("utf-8") if k else None,
+                consumer_timeout_ms=BUFFER_INTERVAL * 1000,
+            )
+            print(f"  ✅ [RSS] Terhubung ke Kafka Broker: {KAFKA_BOOTSTRAP}")
+            break
+        except NoBrokersAvailable:
+            print(f"  ⚠️  [RSS] Broker {KAFKA_BOOTSTRAP} belum tersedia (retry {i+1}/5)...")
+            time.sleep(5)
+    
+    if not consumer: return
     print("  🟢 Consumer RSS aktif (topic: pangan-rss)")
 
     while True:

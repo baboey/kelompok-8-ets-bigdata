@@ -1,130 +1,209 @@
 # [Anggota2]: Producer Simulator Harga Komoditas Pangan
 
+import os
 import json
 import time
 import random
 import math
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from kafka import KafkaProducer
+from kafka.errors import KafkaError, NoBrokersAvailable
 
-# ============================================================
-# KONFIGURASI KOMODITAS
-# Harga baseline berdasarkan data BULOG / BPS terkini
-# ============================================================
-KOMODITAS_CONFIG = {
-    "Beras Medium":     {"harga_dasar": 13500, "std": 200,  "unit": "kg"},
-    "Jagung":           {"harga_dasar": 6500,  "std": 150,  "unit": "kg"},
-    "Kedelai":          {"harga_dasar": 14000, "std": 300,  "unit": "kg"},
-    "Gula Pasir":       {"harga_dasar": 16500, "std": 250,  "unit": "kg"},
-    "Minyak Goreng":    {"harga_dasar": 19000, "std": 400,  "unit": "liter"},
-    "Cabai Merah":      {"harga_dasar": 45000, "std": 3000, "unit": "kg"},
-    "Bawang Merah":     {"harga_dasar": 38000, "std": 2500, "unit": "kg"},
-    "Telur Ayam":       {"harga_dasar": 29000, "std": 500,  "unit": "kg"},
+# ─── Konfigurasi ────────────────────────────────────────────────────────────
+
+# Gunakan 127.0.0.1 untuk stabilitas di Windows host
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "127.0.0.1:9092")
+TOPIC           = "pangan-api"
+INTERVAL_DETIK  = 30       # Kirim data setiap 30 detik
+REGION_LIST     = [
+    "Jakarta", "Surabaya", "Bandung", "Medan",
+    "Makassar", "Semarang", "Yogyakarta", "Palembang",
+]
+
+# ─── Data Komoditas — Harga Base (Rp/kg, per April 2026) ────────────────────
+
+KOMODITAS = {
+    "beras": {
+        "base_price": 13_500,
+        "unit": "kg",
+        "volatility": 0.02,
+        "min_price": 11_000,
+        "max_price": 17_000,
+    },
+    "jagung": {
+        "base_price": 5_200,
+        "unit": "kg",
+        "volatility": 0.04,
+        "min_price": 4_000,
+        "max_price": 7_500,
+    },
+    "kedelai": {
+        "base_price": 11_000,
+        "unit": "kg",
+        "volatility": 0.03,
+        "min_price": 8_500,
+        "max_price": 14_000,
+    },
+    "gula_pasir": {
+        "base_price": 17_500,
+        "unit": "kg",
+        "volatility": 0.025,
+        "min_price": 14_000,
+        "max_price": 22_000,
+    },
+    "minyak_goreng": {
+        "base_price": 15_800,
+        "unit": "liter",
+        "volatility": 0.03,
+        "min_price": 12_000,
+        "max_price": 22_000,
+    },
+    "cabai_merah": {
+        "base_price": 35_000,
+        "unit": "kg",
+        "volatility": 0.12,
+        "min_price": 15_000,
+        "max_price": 100_000,
+    },
+    "bawang_merah": {
+        "base_price": 28_000,
+        "unit": "kg",
+        "volatility": 0.10,
+        "min_price": 12_000,
+        "max_price": 65_000,
+    },
+    "telur_ayam": {
+        "base_price": 28_500,
+        "unit": "kg",
+        "volatility": 0.04,
+        "min_price": 22_000,
+        "max_price": 38_000,
+    },
 }
 
-# State harga saat ini (untuk random walk)
-current_prices = {k: v["harga_dasar"] for k, v in KOMODITAS_CONFIG.items()}
-prev_prices = dict(current_prices)
+# State: simpan harga terakhir per komoditas (random walk)
+harga_state: dict[str, float] = {k: v["base_price"] for k, v in KOMODITAS.items()}
+harga_prev:  dict[str, float] = {k: v["base_price"] for k, v in KOMODITAS.items()}
 
-def simulate_price_movement(komoditas):
-    """
-    Simulasi pergerakan harga menggunakan Random Walk dengan Mean Reversion.
-    Harga bergerak acak tapi selalu balik ke baseline (tidak lari ke infinity).
-    """
-    config = KOMODITAS_CONFIG[komoditas]
-    harga_dasar = config["harga_dasar"]
-    std = config["std"]
-    
-    # Random walk component
-    random_change = random.gauss(0, std * 0.1)
-    
-    # Mean reversion: tarik balik ke harga dasar
-    current = current_prices[komoditas]
-    reversion = (harga_dasar - current) * 0.05
-    
-    # Update harga
-    new_price = current + random_change + reversion
-    
-    # Pastikan tidak negatif dan tidak terlalu jauh dari baseline
-    min_price = harga_dasar * 0.7
-    max_price = harga_dasar * 1.5
-    new_price = max(min_price, min(max_price, new_price))
-    
-    return round(new_price, 0)
+# ─── Fungsi Simulasi Harga ───────────────────────────────────────────────────
 
-def calculate_change_pct(old_price, new_price):
-    """Hitung persentase perubahan harga"""
-    if old_price == 0:
-        return 0.0
-    return round((new_price - old_price) / old_price * 100, 4)
+def simulasi_harga(commodity: str, jam_sekarang: int) -> float:
+    meta      = KOMODITAS[commodity]
+    base      = meta["base_price"]
+    vol       = meta["volatility"]
+    prev      = harga_state[commodity]
 
-def build_event(komoditas, harga_baru):
-    """Build JSON event untuk dikirim ke Kafka"""
-    config = KOMODITAS_CONFIG[komoditas]
-    harga_lama = prev_prices[komoditas]
-    
+    # Siklus harian (sinusoidal)
+    siklus    = 0.015 * math.sin((jam_sekarang - 9) * math.pi / 12)
+
+    # Random walk dengan mean reversion
+    noise     = random.gauss(0, vol * base * 0.3)
+    reversion = (base - prev) * 0.1
+
+    harga_baru = prev + noise + reversion + (siklus * base)
+    harga_baru = max(meta["min_price"], min(meta["max_price"], harga_baru))
+    harga_baru = round(harga_baru / 100) * 100
+
+    harga_state[commodity] = harga_baru
+    return harga_baru
+
+def buat_payload(commodity: str, harga: float, region: str) -> dict:
+    tz_wib    = timezone(timedelta(hours=7))
+    now       = datetime.now(tz_wib)
+    prev      = harga_prev[commodity]
+
+    change      = harga - prev
+    change_pct  = (change / prev * 100) if prev > 0 else 0.0
+    trend       = "naik" if change > 0 else ("turun" if change < 0 else "stabil")
+
+    harga_prev[commodity] = harga
+
     return {
-        "komoditas": komoditas,
-        "harga": harga_baru,
-        "harga_sebelumnya": harga_lama,
-        "perubahan_persen": calculate_change_pct(harga_lama, harga_baru),
-        "harga_baseline": config["harga_dasar"],
-        "unit": config["unit"],
-        "timestamp": datetime.utcnow().isoformat(),
-        "sumber": "simulator_bulog_baseline",
-        "kota": "Nasional"
+        "commodity":    commodity,
+        "price":        int(harga),
+        "unit":         KOMODITAS[commodity]["unit"],
+        "region":       region,
+        "timestamp":    now.isoformat(),
+        "source":       "simulator",
+        "change":       int(change),
+        "change_pct":   round(change_pct, 2),
+        "trend":        trend,
     }
+
+# ─── Main Producer ────────────────────────────────────────────────────────────
 
 def main():
     print("=" * 60)
-    print("🚀 Producer HargaPangan started")
-    print(f"📦 Memantau {len(KOMODITAS_CONFIG)} komoditas")
-    print(f"⏱️  Interval: 30 detik")
+    print("  🌾 HargaPangan Producer — Simulator Harga Komoditas")
+    print(f"  Topic   : {TOPIC}")
+    print(f"  Broker  : {KAFKA_BOOTSTRAP}")
+    print(f"  Interval: {INTERVAL_DETIK} detik")
     print("=" * 60)
-    
-    producer = KafkaProducer(
-        bootstrap_servers=['localhost:9092'],
-        value_serializer=lambda x: json.dumps(x).encode('utf-8'),
-        key_serializer=lambda x: x.encode('utf-8'),
-        enable_idempotence=True,
-        acks='all',
-        retries=5
-    )
-    
-    iteration = 0
-    
-    while True:
-        iteration += 1
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Iteration #{iteration}")
-        
-        for komoditas in KOMODITAS_CONFIG.keys():
-            # Hitung harga baru
-            harga_baru = simulate_price_movement(komoditas)
-            
-            # Build event
-            event = build_event(komoditas, harga_baru)
-            
-            # Update state
-            prev_prices[komoditas] = current_prices[komoditas]
-            current_prices[komoditas] = harga_baru
-            
-            # Kirim ke Kafka
-            producer.send(
-                topic='pangan-api',
-                key=komoditas,
-                value=event
+
+    # Loop retry untuk koneksi awal ke Kafka
+    producer = None
+    max_retries = 5
+    for i in range(max_retries):
+        try:
+            producer = KafkaProducer(
+                bootstrap_servers=[KAFKA_BOOTSTRAP],
+                value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
+                key_serializer=lambda k: k.encode("utf-8"),
+                acks="all",
+                retries=3,
+                linger_ms=10,
+                compression_type="gzip",
             )
-            
-            # Log
-            change = event['perubahan_persen']
-            arrow = "▲" if change > 0 else "▼" if change < 0 else "—"
-            print(f"  {arrow} {komoditas:20s}: Rp {harga_baru:>8,.0f} ({change:+.2f}%)")
-        
-        producer.flush()
-        print(f"✅ {len(KOMODITAS_CONFIG)} events sent to pangan-api")
-        
-        # Tunggu 30 detik sebelum update berikutnya
-        time.sleep(30)
+            print(f"  ✅ Terhubung ke Kafka Broker: {KAFKA_BOOTSTRAP}")
+            break
+        except NoBrokersAvailable:
+            print(f"  ⚠️  Broker {KAFKA_BOOTSTRAP} belum tersedia (mencoba lagi {i+1}/{max_retries})...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"  ❌ Error saat inisialisasi: {e}")
+            time.sleep(5)
+    
+    if not producer:
+        print(f"  ❌ Gagal terhubung ke Kafka setelah {max_retries} percobaan.")
+        return
+
+    siklus = 0
+    try:
+        while True:
+            siklus += 1
+            jam = datetime.now().hour
+            print(f"\n[Siklus #{siklus} — {datetime.now().strftime('%H:%M:%S')}]")
+
+            for commodity in KOMODITAS:
+                region  = random.choice(REGION_LIST)
+                harga   = simulasi_harga(commodity, jam)
+                payload = buat_payload(commodity, harga, region)
+
+                producer.send(
+                    topic=TOPIC,
+                    key=commodity,
+                    value=payload,
+                )
+
+                print(
+                    f"  ✅ {commodity:<15} Rp {payload['price']:>8,}  "
+                    f"{payload['trend']:>6}  {payload['change_pct']:+.2f}%  "
+                    f"[{region}]"
+                )
+
+            producer.flush()
+            print(f"  ↑ {len(KOMODITAS)} records dikirim ke '{TOPIC}'")
+            time.sleep(INTERVAL_DETIK)
+
+    except KeyboardInterrupt:
+        print(f"\n✋ Producer dihentikan. Total siklus: {siklus}")
+    except KafkaError as e:
+        print(f"\n❌ Kafka Error: {e}")
+    finally:
+        if producer:
+            producer.flush()
+            producer.close()
+            print("🔌 Producer ditutup.")
 
 if __name__ == "__main__":
     main()

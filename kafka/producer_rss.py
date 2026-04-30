@@ -6,13 +6,14 @@ Topic   : pangan-rss
 Update  : polling setiap 5 menit
 """
 
+import os
 import json, time, hashlib
 from datetime import datetime, timezone, timedelta
 import feedparser
 from kafka import KafkaProducer
-from kafka.errors import KafkaError
+from kafka.errors import KafkaError, NoBrokersAvailable
 
-KAFKA_BOOTSTRAP = "localhost:9092"
+KAFKA_BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP", "127.0.0.1:9092")
 TOPIC           = "pangan-rss"
 INTERVAL_DETIK  = 300  # 5 menit
 
@@ -97,13 +98,25 @@ def main():
     print(f"  Topic: {TOPIC} | Interval: {INTERVAL_DETIK//60} menit")
     print("=" * 55)
 
-    producer = KafkaProducer(
-        bootstrap_servers=[KAFKA_BOOTSTRAP],
-        value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
-        key_serializer=lambda k: k.encode("utf-8"),
-        acks="all",
-        retries=3,
-    )
+    # Retry loop untuk koneksi Kafka
+    producer = None
+    for i in range(5):
+        try:
+            producer = KafkaProducer(
+                bootstrap_servers=[KAFKA_BOOTSTRAP],
+                value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
+                key_serializer=lambda k: k.encode("utf-8"),
+                acks="all",
+                retries=3,
+            )
+            print(f"  ✅ Terhubung ke Kafka Broker: {KAFKA_BOOTSTRAP}")
+            break
+        except NoBrokersAvailable:
+            print(f"  ⚠️  Broker {KAFKA_BOOTSTRAP} belum tersedia (retry {i+1}/5)...")
+            time.sleep(5)
+    
+    if not producer:
+        return
 
     siklus = 0
     try:
