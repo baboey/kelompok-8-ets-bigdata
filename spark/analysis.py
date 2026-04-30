@@ -65,15 +65,15 @@ def buat_spark_session() -> SparkSession:
 def load_data_api(spark: SparkSession):
     """Load data harga dari HDFS atau fallback file lokal."""
     schema = StructType([
-        StructField("commodity",   StringType(),  True),
-        StructField("price",       IntegerType(), True),
+        StructField("komoditas",   StringType(),  True),
+        StructField("harga",       IntegerType(), True),
+        StructField("harga_sebelumnya", IntegerType(), True),
+        StructField("perubahan_persen",  DoubleType(),  True),
+        StructField("harga_baseline", IntegerType(), True),
         StructField("unit",        StringType(),  True),
-        StructField("region",      StringType(),  True),
         StructField("timestamp",   StringType(),  True),
-        StructField("source",      StringType(),  True),
-        StructField("change",      IntegerType(), True),
-        StructField("change_pct",  DoubleType(),  True),
-        StructField("trend",       StringType(),  True),
+        StructField("sumber",      StringType(),  True),
+        StructField("kota",      StringType(),  True),
     ])
 
     # Coba HDFS dulu
@@ -114,12 +114,12 @@ def analisis_volatilitas(df_api):
 
     hasil = (
         df_api
-        .groupBy("commodity")
+        .groupBy("komoditas")
         .agg(
-            F.max("price").alias("harga_max"),
-            F.min("price").alias("harga_min"),
-            F.avg("price").alias("harga_avg"),
-            F.count("price").alias("jumlah_data"),
+            F.max("harga").alias("harga_max"),
+            F.min("harga").alias("harga_min"),
+            F.avg("harga").alias("harga_avg"),
+            F.count("harga").alias("jumlah_data"),
         )
         .withColumn(
             "volatilitas_pct",
@@ -148,16 +148,16 @@ def analisis_tren_harga(spark: SparkSession, df_api):
 
     hasil = spark.sql("""
         SELECT
-            commodity,
+            komoditas,
             SUBSTRING(timestamp, 1, 13) AS periode,
-            CAST(AVG(price) AS INT)      AS harga_rata,
-            MIN(price)                   AS harga_min,
-            MAX(price)                   AS harga_max,
+            CAST(AVG(harga) AS INT)      AS harga_rata,
+            MIN(harga)                   AS harga_min,
+            MAX(harga)                   AS harga_max,
             COUNT(*)                     AS jumlah_data
         FROM harga_pangan
-        WHERE price IS NOT NULL
-        GROUP BY commodity, SUBSTRING(timestamp, 1, 13)
-        ORDER BY commodity, periode
+        WHERE harga IS NOT NULL
+        GROUP BY komoditas, SUBSTRING(timestamp, 1, 13)
+        ORDER BY komoditas, periode
     """)
 
     hasil.show(50, truncate=False)
@@ -184,14 +184,14 @@ def analisis_korelasi_berita(spark: SparkSession, df_api, df_rss):
         ).count()
 
         # Rata-rata change_pct untuk komoditas ini
-        avg_change = df_api.filter(F.col("commodity").contains(kw)) \
-                           .agg(F.avg("change_pct")) \
+        avg_change = df_api.filter(F.col("komoditas").contains(kw)) \
+                           .agg(F.avg("perubahan_persen")) \
                            .collect()[0][0]
 
         rows.append({
             "komoditas":    kw,
             "frekuensi_berita": jumlah,
-            "avg_change_pct":   round(avg_change, 2) if avg_change else 0.0,
+            "avg_perubahan_persen":   round(avg_change, 2) if avg_change else 0.0,
         })
 
     from pyspark.sql import Row
@@ -219,10 +219,10 @@ def analisis_prediksi_mlllib(spark: SparkSession, df_api):
     # Filter beras saja sebagai contoh
     df_beras = (
         df_api
-        .filter(F.col("commodity") == "beras")
+        .filter(F.lower(F.col("komoditas")).contains("beras"))
         .orderBy("timestamp")
         .withColumn("idx", F.monotonically_increasing_id().cast("double"))
-        .select("idx", F.col("price").cast("double").alias("price"))
+        .select("idx", F.col("harga").cast("double").alias("price"))
         .na.drop()
     )
 
@@ -280,7 +280,7 @@ def simpan_hasil(spark, df_volatilitas, df_tren, korelasi_rows, prediksi):
         "generated_at":  datetime.now().isoformat(),
         "volatilitas":   [
             {
-                "commodity":      r["commodity"],
+                "komoditas":      r["komoditas"],
                 "harga_max":      r["harga_max"],
                 "harga_min":      r["harga_min"],
                 "harga_avg":      round(r["harga_avg"]),
