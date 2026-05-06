@@ -3,7 +3,7 @@ producer_rss.py — Producer RSS Feed Berita Ekonomi Pangan
 ==========================================================
 Anggota : Akbar
 Topic   : pangan-rss
-Update  : polling setiap 5 menit
+Update  : polling setiap 5 menit dengan scheduler
 """
 
 import json, time, hashlib
@@ -11,10 +11,11 @@ from datetime import datetime, timezone, timedelta
 import feedparser
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
+import schedule
+from tenacity import retry, wait_exponential, stop_after_attempt
 
 KAFKA_BOOTSTRAP = "localhost:9092"
 TOPIC           = "pangan-rss"
-INTERVAL_DETIK  = 300  # 5 menit
 
 RSS_FEEDS = [
     {"url": "https://rss.bisnis.com/feed/rss2/ekonomi",    "source": "bisnis.com"},
@@ -50,12 +51,13 @@ def parse_published(entry) -> str:
     return datetime.now().isoformat()
 
 
+@retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
 def fetch_feed(producer, feed_url: str, source: str) -> int:
     try:
         feed = feedparser.parse(feed_url)
     except Exception as e:
         print(f"  ⚠️  Gagal fetch {source}: {e}")
-        return 0
+        raise e
 
     count = 0
     tz_wib = timezone(timedelta(hours=7))
@@ -91,36 +93,51 @@ def fetch_feed(producer, feed_url: str, source: str) -> int:
     return count
 
 
+def job(producer):
+    total = 0
+    print(f"\n[Scheduler — {datetime.now().strftime('%H:%M:%S')}]")
+    for feed in RSS_FEEDS:
+        print(f"  🔗 Fetching {feed['source']}...")
+        try:
+            n = fetch_feed(producer, feed["url"], feed["source"])
+            total += n
+            print(f"     → {n} artikel baru dikirim")
+        except Exception as e:
+            print(f"     → Gagal setelah retries: {e}")
+    producer.flush()
+    print(f"  ↑ Total: {total} artikel | Cache: {len(sent_urls)} URL")
+
+
 def main():
     print("=" * 55)
     print("  📡 HargaPangan Producer — RSS Berita Ekonomi")
-    print(f"  Topic: {TOPIC} | Interval: {INTERVAL_DETIK//60} menit")
+    print(f"  Topic: {TOPIC} | Scheduler: 5 menit")
     print("=" * 55)
 
-    producer = KafkaProducer(
-        bootstrap_servers=[KAFKA_BOOTSTRAP],
-        value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
-        key_serializer=lambda k: k.encode("utf-8"),
-        acks="all",
-        retries=3,
-    )
+    try:
+        producer = KafkaProducer(
+            bootstrap_servers=[KAFKA_BOOTSTRAP],
+            value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
+            key_serializer=lambda k: k.encode("utf-8"),
+            acks="all",
+            retries=5,
+        )
+    except KafkaError as e:
+        print(f"Gagal inisialisasi Kafka Producer: {e}")
+        return
 
-    siklus = 0
+    # Run immediately first
+    job(producer)
+
+    # Schedule every 5 minutes
+    schedule.every(5).minutes.do(job, producer)
+
     try:
         while True:
-            siklus += 1
-            total = 0
-            print(f"\n[Siklus #{siklus} — {datetime.now().strftime('%H:%M:%S')}]")
-            for feed in RSS_FEEDS:
-                print(f"  🔗 Fetching {feed['source']}...")
-                n = fetch_feed(producer, feed["url"], feed["source"])
-                total += n
-                print(f"     → {n} artikel baru dikirim")
-            producer.flush()
-            print(f"  ↑ Total: {total} artikel | Cache: {len(sent_urls)} URL")
-            time.sleep(INTERVAL_DETIK)
+            schedule.run_pending()
+            time.sleep(1)
     except KeyboardInterrupt:
-        print(f"\n✋ Dihentikan. Siklus: {siklus}")
+        print(f"\n✋ Dihentikan.")
     finally:
         producer.flush()
         producer.close()

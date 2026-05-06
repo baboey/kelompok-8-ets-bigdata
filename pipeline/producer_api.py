@@ -6,6 +6,9 @@ import random
 import math
 from datetime import datetime
 from kafka import KafkaProducer
+from kafka.errors import KafkaError
+import schedule
+from tenacity import retry, wait_exponential, stop_after_attempt
 
 # ============================================================
 # KONFIGURASI KOMODITAS
@@ -75,55 +78,83 @@ def build_event(komoditas, harga_baru):
         "kota": "Nasional"
     }
 
-def main():
-    print("=" * 60)
-    print("🚀 Producer HargaPangan started")
-    print(f"📦 Memantau {len(KOMODITAS_CONFIG)} komoditas")
-    print(f"⏱️  Interval: 30 detik")
-    print("=" * 60)
-    
-    producer = KafkaProducer(
-        bootstrap_servers=['localhost:9092'],
-        value_serializer=lambda x: json.dumps(x).encode('utf-8'),
-        key_serializer=lambda x: x.encode('utf-8'),
-        acks='all',
-        retries=5
+iteration = 0
+
+@retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
+def send_to_kafka(producer, topic, key, event):
+    producer.send(
+        topic=topic,
+        key=key,
+        value=event
     )
+
+def job(producer):
+    global iteration
+    iteration += 1
+    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Iteration #{iteration} (Scheduler)")
     
-    iteration = 0
-    
-    while True:
-        iteration += 1
-        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Iteration #{iteration}")
+    for komoditas in KOMODITAS_CONFIG.keys():
+        # Hitung harga baru
+        harga_baru = simulate_price_movement(komoditas)
         
-        for komoditas in KOMODITAS_CONFIG.keys():
-            # Hitung harga baru
-            harga_baru = simulate_price_movement(komoditas)
-            
-            # Build event
-            event = build_event(komoditas, harga_baru)
-            
-            # Update state
-            prev_prices[komoditas] = current_prices[komoditas]
-            current_prices[komoditas] = harga_baru
-            
-            # Kirim ke Kafka
-            producer.send(
-                topic='pangan-api',
-                key=komoditas,
-                value=event
-            )
-            
+        # Build event
+        event = build_event(komoditas, harga_baru)
+        
+        # Update state
+        prev_prices[komoditas] = current_prices[komoditas]
+        current_prices[komoditas] = harga_baru
+        
+        # Kirim ke Kafka dengan retry logic
+        try:
+            send_to_kafka(producer, 'pangan-api', komoditas, event)
             # Log
             change = event['perubahan_persen']
             arrow = "▲" if change > 0 else "▼" if change < 0 else "—"
             print(f"  {arrow} {komoditas:20s}: Rp {harga_baru:>8,.0f} ({change:+.2f}%)")
-        
+        except Exception as e:
+            print(f"  ❌ Gagal kirim {komoditas} ke Kafka setelah retries: {e}")
+    
+    try:
         producer.flush()
         print(f"✅ {len(KOMODITAS_CONFIG)} events sent to pangan-api")
+    except Exception as e:
+        print(f"❌ Error during flush: {e}")
+
+
+def main():
+    print("=" * 60)
+    print("🚀 Producer HargaPangan started")
+    print(f"📦 Memantau {len(KOMODITAS_CONFIG)} komoditas")
+    print(f"⏱️  Scheduler Interval: 30 detik")
+    print("=" * 60)
+    
+    try:
+        producer = KafkaProducer(
+            bootstrap_servers=['localhost:9092'],
+            value_serializer=lambda x: json.dumps(x).encode('utf-8'),
+            key_serializer=lambda x: x.encode('utf-8'),
+            acks='all',
+            retries=5
+        )
+    except KafkaError as e:
+        print(f"Gagal inisialisasi Kafka Producer: {e}")
+        return
         
-        # Tunggu 30 detik sebelum update berikutnya
-        time.sleep(30)
+    # Run immediately first
+    job(producer)
+    
+    # Schedule every 30 seconds
+    schedule.every(30).seconds.do(job, producer)
+    
+    try:
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print(f"\n✋ Dihentikan.")
+    finally:
+        producer.flush()
+        producer.close()
 
 if __name__ == "__main__":
     main()

@@ -1,23 +1,23 @@
 """
-consumer_to_hdfs.py — Consumer Kafka → HDFS + Local JSON
-=========================================================
+consumer_to_hdfs.py — Consumer Kafka → HDFS (Parquet) + Local JSON
+==================================================================
 Anggota : Akbar
 Topics  : pangan-api, pangan-rss
 Group   : pangan-consumer-group
 
-Alur data (arsitektur benar):
+Alur data:
   Kafka → Consumer (real-time) → local JSON (dashboard langsung baca)
-                               → HDFS (batch setiap HDFS_BATCH_SIZE pesan)
-
-Cara menjalankan:
-    pip install kafka-python-ng hdfs
-    python consumer_to_hdfs.py
+                               → Preprocessing (TextBlob Sentiment Analysis)
+                               → HDFS (Parquet format, partitioned by Date)
 """
 
 import json, os, threading, time
 from datetime import datetime, timezone, timedelta
 from collections import deque
 from kafka import KafkaConsumer
+import pandas as pd
+from textblob import TextBlob
+from tenacity import retry, wait_exponential, stop_after_attempt
 
 # ─── Konfigurasi ─────────────────────────────────────────────────────────────
 
@@ -25,7 +25,7 @@ KAFKA_BOOTSTRAP  = "localhost:9092"
 GROUP_ID         = "pangan-consumer-group"
 HDFS_URL         = "http://localhost:9870"      # NameNode WebHDFS
 HDFS_USER        = "root"
-HDFS_BATCH_SIZE  = 24     # Flush ke HDFS setiap 24 pesan (3 iterasi producer)
+HDFS_BATCH_SIZE  = 24     # Flush ke HDFS setiap 24 pesan
 MAX_LOCAL_EVENTS = 50     # Simpan 50 event terakhir di local JSON
 
 # Path HDFS
@@ -48,60 +48,90 @@ local_rss = deque(maxlen=20)
 
 TZ_WIB = timezone(timedelta(hours=7))
 
+# ─── Preprocessing & ML ──────────────────────────────────────────────────────
+
+def preprocess_and_analyze(data: list, label: str) -> pd.DataFrame:
+    """Preprocess data and apply Text Classification/Sentiment Analysis for RSS."""
+    df = pd.DataFrame(data)
+    
+    if label == "RSS" and not df.empty:
+        # Preprocessing text: lowercasing and basic cleaning
+        df["cleaned_title"] = df["title"].astype(str).str.lower().str.strip()
+        df["cleaned_summary"] = df["summary"].astype(str).str.lower().str.strip()
+        
+        # Machine Learning Component: Sentiment Analysis using TextBlob
+        def get_sentiment(text):
+            analysis = TextBlob(text)
+            polarity = analysis.sentiment.polarity
+            if polarity > 0.1:
+                return 'positive'
+            elif polarity < -0.1:
+                return 'negative'
+            else:
+                return 'neutral'
+                
+        df["sentiment"] = df["cleaned_title"].apply(get_sentiment)
+
+    # Convert timestamp column to datetime for partitioning
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["year"] = df["timestamp"].dt.year
+        df["month"] = df["timestamp"].dt.month
+        df["day"] = df["timestamp"].dt.day
+        
+    return df
 
 # ─── Fungsi HDFS ─────────────────────────────────────────────────────────────
 
+@retry(wait=wait_exponential(multiplier=1, min=2, max=10), stop=stop_after_attempt(3))
 def simpan_ke_hdfs(data: list, hdfs_path: str, label: str):
-    """Simpan batch data ke HDFS via library hdfs atau fallback docker exec."""
+    """Simpan batch data ke HDFS dalam format Parquet dengan partisi."""
     if not data:
         return
 
-    timestamp = datetime.now(TZ_WIB).strftime("%Y-%m-%d_%H-%M-%S")
-    filename  = f"{timestamp}.json"
-    konten    = "\n".join(json.dumps(d, ensure_ascii=False) for d in data)
+    # Preprocessing and Sentiment Analysis
+    df = preprocess_and_analyze(data, label)
+    
+    timestamp_str = datetime.now(TZ_WIB).strftime("%Y-%m-%d_%H-%M-%S")
+    filename  = f"{timestamp_str}.parquet"
 
-    # Coba hdfs Python library
+    # Save to local temporary Parquet file first
     try:
-        from hdfs import InsecureClient
-        client    = InsecureClient(HDFS_URL, user=HDFS_USER)
-        full_path = f"{hdfs_path}/{filename}"
-        client.makedirs(hdfs_path)
-        with client.write(full_path, encoding="utf-8", overwrite=True) as writer:
-            writer.write(konten)
-        print(f"  [HDFS] [{label}] → {full_path} ({len(data)} records)")
-        return
-    except ImportError:
-        pass
-    except Exception as e:
-        print(f"  [HDFS] Peringatan: {e} — mencoba fallback docker exec")
-
-    # Fallback: docker exec ke namenode
-    try:
-        import subprocess, tempfile
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json",
-                                         delete=False, encoding="utf-8") as f:
-            f.write(konten)
-            tmp_path = f.name
-
-        full_path = f"{hdfs_path}/{filename}"
-        subprocess.run(
-            ["docker", "exec", "-i", "namenode",
-             "hdfs", "dfs", "-mkdir", "-p", hdfs_path],
-            check=True, capture_output=True
-        )
-        subprocess.run(
-            ["docker", "cp", tmp_path, f"namenode:/tmp/{filename}"],
-            check=True, capture_output=True
-        )
-        subprocess.run(
-            ["docker", "exec", "namenode",
-             "hdfs", "dfs", "-put", "-f", f"/tmp/{filename}", full_path],
-            check=True, capture_output=True
-        )
-        os.unlink(tmp_path)
-        print(f"  [HDFS] [{label}] → {full_path} ({len(data)} records) via docker exec")
+        import tempfile, subprocess
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_parquet_path = os.path.join(tmp_dir, filename)
+            # Simpan tanpa partisi di lokal untuk dikirim ke folder partisi HDFS
+            df.to_parquet(tmp_parquet_path, engine="pyarrow", index=False)
+            
+            # Kita tentukan folder partisi dari data record pertama
+            year = df["year"].iloc[0] if "year" in df.columns else datetime.now(TZ_WIB).year
+            month = df["month"].iloc[0] if "month" in df.columns else datetime.now(TZ_WIB).month
+            day = df["day"].iloc[0] if "day" in df.columns else datetime.now(TZ_WIB).day
+            
+            partitioned_hdfs_path = f"{hdfs_path}/year={year}/month={month}/day={day}"
+            full_path = f"{partitioned_hdfs_path}/{filename}"
+            
+            # Buat direktori partisi di HDFS
+            subprocess.run(
+                ["docker", "exec", "-i", "namenode",
+                 "hdfs", "dfs", "-mkdir", "-p", partitioned_hdfs_path],
+                check=True, capture_output=True
+            )
+            # Copy Parquet ke docker container (namenode)
+            subprocess.run(
+                ["docker", "cp", tmp_parquet_path, f"namenode:/tmp/{filename}"],
+                check=True, capture_output=True
+            )
+            # Pindahkan ke path tujuan di HDFS
+            subprocess.run(
+                ["docker", "exec", "namenode",
+                 "hdfs", "dfs", "-put", "-f", f"/tmp/{filename}", full_path],
+                check=True, capture_output=True
+            )
+            print(f"  [HDFS] [{label}] → {full_path} ({len(data)} records) - Parquet Partitioned")
     except Exception as e:
         print(f"  [HDFS] Gagal simpan ke HDFS: {e}")
+        raise e
 
 
 def update_local_file(filepath: str, data: deque):
@@ -112,27 +142,6 @@ def update_local_file(filepath: str, data: deque):
             json.dump(list(data), f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"  [LOCAL] Gagal update {os.path.basename(filepath)}: {e}")
-
-
-def cek_hdfs_files(hdfs_path: str) -> list:
-    """Cek file yang ada di HDFS path (untuk verifikasi)."""
-    try:
-        from hdfs import InsecureClient
-        client = InsecureClient(HDFS_URL, user=HDFS_USER)
-        files = client.list(hdfs_path, status=True)
-        return [(f, s['length']) for f, s in files]
-    except Exception:
-        pass
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["docker", "exec", "namenode",
-             "hdfs", "dfs", "-ls", hdfs_path],
-            capture_output=True, text=True
-        )
-        return result.stdout.strip().split("\n")[1:]  # skip header
-    except Exception:
-        return []
 
 
 # ─── Thread Consumer API ──────────────────────────────────────────────────────
@@ -151,32 +160,38 @@ def consume_api():
     print("  [OK] Consumer API aktif (topic: pangan-api)")
 
     msg_count = 0
-    for msg in consumer:
-        data = msg.value
+    try:
+        for msg in consumer:
+            data = msg.value
 
-        # 1. Update local JSON LANGSUNG (real-time untuk dashboard)
-        with buffer_lock:
-            local_api.append(data)
-            buffer_api.append(data)
-            msg_count += 1
-            current_count = len(buffer_api)
-
-        update_local_file(LOCAL_API_FILE, local_api)
-
-        # Log ringkas
-        kom  = data.get("komoditas", "?")
-        harga = data.get("harga", 0)
-        pct  = data.get("perubahan_persen", 0)
-        arrow = "+" if pct > 0 else ("-" if pct < 0 else "=")
-        print(f"  [API] #{msg_count} {kom:<15} Rp {harga:>9,.0f} ({arrow}{abs(pct):.2f}%) "
-              f"| local={len(local_api)}/{MAX_LOCAL_EVENTS} | hdfs_batch={current_count}/{HDFS_BATCH_SIZE}")
-
-        # 2. Flush ke HDFS setelah batch penuh
-        if current_count >= HDFS_BATCH_SIZE:
+            # 1. Update local JSON LANGSUNG (real-time untuk dashboard)
             with buffer_lock:
-                batch = buffer_api.copy()
-                buffer_api.clear()
-            simpan_ke_hdfs(batch, HDFS_PATH_API, "API")
+                local_api.append(data)
+                buffer_api.append(data)
+                msg_count += 1
+                current_count = len(buffer_api)
+
+            update_local_file(LOCAL_API_FILE, local_api)
+
+            # Log ringkas
+            kom  = data.get("komoditas", "?")
+            harga = data.get("harga", 0)
+            pct  = data.get("perubahan_persen", 0)
+            arrow = "+" if pct > 0 else ("-" if pct < 0 else "=")
+            print(f"  [API] #{msg_count} {kom:<15} Rp {harga:>9,.0f} ({arrow}{abs(pct):.2f}%) "
+                  f"| local={len(local_api)}/{MAX_LOCAL_EVENTS} | hdfs_batch={current_count}/{HDFS_BATCH_SIZE}")
+
+            # 2. Flush ke HDFS setelah batch penuh
+            if current_count >= HDFS_BATCH_SIZE:
+                with buffer_lock:
+                    batch = buffer_api.copy()
+                    buffer_api.clear()
+                try:
+                    simpan_ke_hdfs(batch, HDFS_PATH_API, "API")
+                except Exception as e:
+                    print(f"  [ERROR] Gagal simpan HDFS setelah retries: {e}")
+    except Exception as e:
+        print(f"  [CRITICAL] Error di consumer API: {e}")
 
 
 # ─── Thread Consumer RSS ──────────────────────────────────────────────────────
@@ -195,46 +210,36 @@ def consume_rss():
     print("  [OK] Consumer RSS aktif (topic: pangan-rss)")
 
     rss_count = 0
-    for msg in consumer:
-        data = msg.value
-        rss_count += 1
+    try:
+        for msg in consumer:
+            data = msg.value
+            rss_count += 1
 
-        with buffer_lock:
-            local_rss.append(data)
-            buffer_rss.append(data)
-            current_rss = len(buffer_rss)
-
-        update_local_file(LOCAL_RSS_FILE, local_rss)
-        print(f"  [RSS] #{rss_count} {data.get('title','?')[:60]}...")
-
-        if current_rss >= 10:
             with buffer_lock:
-                batch = buffer_rss.copy()
-                buffer_rss.clear()
-            simpan_ke_hdfs(batch, HDFS_PATH_RSS, "RSS")
+                local_rss.append(data)
+                buffer_rss.append(data)
+                current_rss = len(buffer_rss)
 
+            update_local_file(LOCAL_RSS_FILE, local_rss)
+            print(f"  [RSS] #{rss_count} {data.get('title','?')[:60]}...")
 
-# ─── Thread Verifikasi HDFS ───────────────────────────────────────────────────
-
-def monitor_hdfs():
-    """Thread background: cetak isi HDFS setiap 5 menit sebagai verifikasi."""
-    while True:
-        time.sleep(300)  # setiap 5 menit
-        print("\n  ====== VERIFIKASI HDFS ======")
-        api_files = cek_hdfs_files(HDFS_PATH_API)
-        rss_files = cek_hdfs_files(HDFS_PATH_RSS)
-        print(f"  [HDFS] /data/pangan/api/ → {len(api_files)} file(s)")
-        for f in api_files[-5:]:  # tampilkan 5 terbaru
-            print(f"         {f}")
-        print(f"  [HDFS] /data/pangan/rss/ → {len(rss_files)} file(s)")
-        print("  ==============================\n")
+            if current_rss >= 10:
+                with buffer_lock:
+                    batch = buffer_rss.copy()
+                    buffer_rss.clear()
+                try:
+                    simpan_ke_hdfs(batch, HDFS_PATH_RSS, "RSS")
+                except Exception as e:
+                    print(f"  [ERROR] Gagal simpan HDFS setelah retries: {e}")
+    except Exception as e:
+        print(f"  [CRITICAL] Error di consumer RSS: {e}")
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     print("=" * 60)
-    print("  HargaPangan Consumer — Kafka → Local JSON + HDFS")
+    print("  HargaPangan Consumer — Kafka → Preprocessing → HDFS (Parquet)")
     print(f"  Group      : {GROUP_ID}")
     print(f"  HDFS       : {HDFS_URL}")
     print(f"  Local JSON : {LOCAL_API_FILE}")
@@ -247,11 +252,9 @@ def main():
     # Threads
     t_api  = threading.Thread(target=consume_api,  name="consumer-api",  daemon=True)
     t_rss  = threading.Thread(target=consume_rss,  name="consumer-rss",  daemon=True)
-    t_hdfs = threading.Thread(target=monitor_hdfs, name="hdfs-monitor",  daemon=True)
 
     t_api.start()
     t_rss.start()
-    t_hdfs.start()
 
     try:
         while True:
