@@ -7,6 +7,7 @@ Group   : pangan-consumer-group
 
 Alur data:
   Kafka → Consumer (real-time) → local JSON (dashboard langsung baca)
+                               → Preprocessing (ML Pipeline)
                                → HDFS (JSON format, diberi nama timestamp)
 """
 
@@ -16,6 +17,10 @@ from collections import deque
 from kafka import KafkaConsumer
 from tenacity import retry, wait_exponential, stop_after_attempt
 import subprocess
+import pandas as pd
+from textblob import TextBlob
+
+from ml_pipeline import rss_classifier, api_regressor
 
 # ─── Konfigurasi ─────────────────────────────────────────────────────────────
 
@@ -44,6 +49,47 @@ local_rss = deque(maxlen=20)
 
 TZ_WIB = timezone(timedelta(hours=7))
 
+# ─── Preprocessing & ML ──────────────────────────────────────────────────────
+
+def preprocess_and_analyze(data: list, label: str) -> pd.DataFrame:
+    """Preprocess data and apply Text Classification/Sentiment Analysis for RSS."""
+    df = pd.DataFrame(data)
+    
+    if label == "RSS" and not df.empty:
+        # Preprocessing text: lowercasing and basic cleaning
+        df["cleaned_title"] = df["title"].astype(str).str.lower().str.strip()
+        df["cleaned_summary"] = df["summary"].astype(str).str.lower().str.strip()
+        
+        # Rule-based Component: Sentiment Analysis using TextBlob (serves as synthetic target label)
+        def get_sentiment(text):
+            analysis = TextBlob(text)
+            polarity = analysis.sentiment.polarity
+            if polarity > 0.1:
+                return 'positive'
+            elif polarity < -0.1:
+                return 'negative'
+            else:
+                return 'neutral'
+                
+        df["sentiment"] = df["cleaned_title"].apply(get_sentiment)
+        
+        # ── ML Component: Retrain and Predict ──
+        acc = rss_classifier.retrain(df)
+        if acc is not None:
+            print(f"  [ML] RSS Classifier retrained. Accuracy: {acc:.2f}")
+        df = rss_classifier.predict(df)
+
+    elif label == "API" and not df.empty:
+        # ── ML Component: Retrain and Predict ──
+        # Ensure we have the necessary columns before predicting/training
+        if "komoditas" in df.columns and "harga" in df.columns:
+            # We don't want to convert "harga" permanently to string if it's already int, but ensure we use a clean float copy inside ML
+            rmse = api_regressor.retrain(df)
+            if rmse is not None:
+                print(f"  [ML] API Price Regressor retrained. RMSE: {rmse:.2f}")
+            df = api_regressor.predict(df)
+
+    return df
 
 # ─── Fungsi HDFS ─────────────────────────────────────────────────────────────
 
@@ -57,6 +103,9 @@ def simpan_ke_hdfs(data: list, hdfs_path: str, label: str):
     if not data:
         return
 
+    # Preprocessing and ML evaluation
+    df = preprocess_and_analyze(data, label)
+
     timestamp_str = datetime.now(TZ_WIB).strftime("%Y-%m-%d_%H-%M-%S")
     filename  = f"{timestamp_str}.json"
 
@@ -66,8 +115,12 @@ def simpan_ke_hdfs(data: list, hdfs_path: str, label: str):
             tmp_file_path = os.path.join(tmp_dir, filename)
 
             # Simpan ke file lokal sementara sebagai JSON lines
+            # Ensure timestamps are serialized correctly
+            if "timestamp" in df.columns:
+                df["timestamp"] = df["timestamp"].astype(str)
+                
             with open(tmp_file_path, "w", encoding="utf-8") as f:
-                for record in data:
+                for record in df.to_dict('records'):
                     f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
             hdfs_full_path = f"{hdfs_path}/{filename}"
@@ -84,6 +137,10 @@ def simpan_ke_hdfs(data: list, hdfs_path: str, label: str):
                 check=True, capture_output=True
             )
             print(f"  [HDFS] [{label}] → {hdfs_full_path} ({len(data)} records) - JSON")
+    except subprocess.CalledProcessError as e:
+        err_msg = e.stderr.decode('utf-8') if e.stderr else str(e)
+        print(f"  [HDFS] Docker command failed: {err_msg}")
+        raise e
     except Exception as e:
         print(f"  [HDFS] Gagal simpan ke HDFS: {e}")
         raise e
@@ -118,6 +175,16 @@ def consume_api():
     try:
         for msg in consumer:
             data = msg.value
+
+            # -- ML Component: Predict Real-time for Dashboard --
+            try:
+                single_df = pd.DataFrame([data])
+                if "komoditas" in single_df.columns and not single_df.empty:
+                    single_df = api_regressor.predict(single_df)
+                    if 'ml_harga_pred' in single_df.columns:
+                        data['ml_harga_pred'] = float(single_df['ml_harga_pred'].iloc[0])
+            except Exception as e:
+                pass # Fail silently for prediction
 
             # 1. Update local JSON LANGSUNG (real-time untuk dashboard)
             with buffer_lock:
@@ -170,6 +237,17 @@ def consume_rss():
             data = msg.value
             rss_count += 1
 
+            # -- ML Component: Predict Real-time for Dashboard --
+            try:
+                single_df = pd.DataFrame([data])
+                if "title" in single_df.columns and not single_df.empty:
+                    single_df["cleaned_title"] = single_df["title"].astype(str).str.lower().str.strip()
+                    single_df = rss_classifier.predict(single_df)
+                    if 'ml_sentiment_pred' in single_df.columns:
+                        data['ml_sentiment_pred'] = str(single_df['ml_sentiment_pred'].iloc[0])
+            except Exception as e:
+                pass # Fail silently for prediction
+
             with buffer_lock:
                 local_rss.append(data)
                 buffer_rss.append(data)
@@ -194,7 +272,7 @@ def consume_rss():
 
 def main():
     print("=" * 60)
-    print("  HargaPangan Consumer — Kafka → HDFS (JSON) + Local JSON")
+    print("  HargaPangan Consumer — Kafka → Preprocessing → HDFS (JSON)")
     print(f"  Group      : {GROUP_ID}")
     print(f"  Local JSON : {LOCAL_API_FILE}")
     print(f"  HDFS batch : setiap {HDFS_BATCH_SIZE} pesan")

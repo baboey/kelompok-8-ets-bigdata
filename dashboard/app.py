@@ -27,6 +27,7 @@ DATA_DIR      = os.path.join(os.path.dirname(__file__), "data")
 FILE_API      = os.path.join(DATA_DIR, "live_api.json")
 FILE_RSS      = os.path.join(DATA_DIR, "live_rss.json")
 FILE_SPARK    = os.path.join(DATA_DIR, "spark_results.json")
+FILE_ML_STATS = os.path.join(DATA_DIR, "ml_stats.json")
 
 
 def baca_json(filepath: str, default=None):
@@ -58,6 +59,7 @@ def harga_terkini(data_list: list) -> dict:
                 "kota":                 item.get("kota", ""),
                 "timestamp":            item.get("timestamp", ""),
                 "harga_baseline":       item.get("harga_baseline", 0),
+                "ml_harga_pred":        item.get("ml_harga_pred", None),
             }
     return terkini
 
@@ -111,6 +113,7 @@ def api_data():
     prices_raw  = baca_json(FILE_API,   default=[])
     news_raw    = baca_json(FILE_RSS,   default=[])
     spark_raw   = baca_json(FILE_SPARK, default={})
+    ml_stats    = baca_json(FILE_ML_STATS, default={})
 
     return jsonify({
         "status":       "ok",
@@ -121,6 +124,7 @@ def api_data():
         },
         "news":         news_raw[-20:] if news_raw else [],
         "spark":        spark_raw,
+        "ml_stats":     ml_stats,
     })
 
 

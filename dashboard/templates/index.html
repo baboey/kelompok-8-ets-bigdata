@@ -140,12 +140,13 @@
       </div>
     </div>
 
-    <!-- Panel 6: Prediksi MLlib (Bonus) -->
+    <!-- Panel 6: Prediksi ML Pipeline (Scikit-Learn) -->
     <div class="card card-full" id="panel-mlllib">
       <div class="card-title">
         <span class="icon">🤖</span>
-        Prediksi Tren Harga — MLlib Linear Regression
+        Evaluasi Model Machine Learning (Scikit-Learn)
         <span style="margin-left: auto">
+          Update Otomatis Saat Retraining
         </span>
       </div>
       <div id="mlllib-container">
@@ -232,6 +233,7 @@
         <div class="harga-nilai">${fmtRupiah(d.harga)}</div>
         <div class="harga-change ${trendClass}">${arrow} ${pct}</div>
         <div class="harga-region">${d.kota || ""}</div>
+        <div class="harga-ml" style="font-size: 0.75rem; color: #8b949e; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 5px;">🤖 ML Prediksi: ${d.ml_harga_pred ? fmtRupiah(d.ml_harga_pred) : "Memuat..."}</div>
       </div>`;
         })
         .join("");
@@ -347,14 +349,22 @@
         .slice()
         .reverse()
         .map(
-          (a) => `
-    <a class="news-item" href="${a.link || "#"}" target="_blank" rel="noopener">
+          (a) => {
+            let sentColor = "#8b949e";
+            if (a.ml_sentiment_pred === "positive") sentColor = "#238636";
+            else if (a.ml_sentiment_pred === "negative") sentColor = "#da3633";
+            const sentBadge = a.ml_sentiment_pred ? `<span style="background:${sentColor};color:white;padding:2px 8px;border-radius:12px;font-size:0.65rem;margin-left:auto;">🤖 ML: ${a.ml_sentiment_pred.toUpperCase()}</span>` : "";
+            
+            return `
+    <a class="news-item" href="${a.link || "#"}" target="_blank" rel="noopener" style="display:block;">
       <div class="news-title">${a.title || "(Tanpa judul)"}</div>
-      <div class="news-meta">
+      <div class="news-meta" style="display:flex; align-items:center; gap:8px;">
         <span class="news-source">${a.source || ""}</span>
         <span>${a.published ? new Date(a.published).toLocaleDateString("id-ID") : ""}</span>
+        ${sentBadge}
       </div>
-    </a>`,
+    </a>`;
+          }
         )
         .join("");
     }
@@ -384,35 +394,40 @@
         .join("");
     }
 
-    // ── Panel 6: MLlib ───────────────────────────────────────────────────────────
-    function renderMLlib(prediksi) {
+    // ── Panel 6: ML Pipeline Stats ───────────────────────────────────────────────
+    function renderMLStats(stats) {
       const container = document.getElementById("mlllib-container");
-      if (!prediksi) {
+      if (!stats || Object.keys(stats).length === 0) {
         container.innerHTML =
-          '<div class="loading-text">Jalankan spark/analysis.py untuk melihat prediksi...</div>';
+          '<div class="loading-text">Menunggu batch data pertama untuk melatih model...</div>';
         return;
       }
+
+      const api_rmse = stats.api_rmse || 0;
+      const api_r2 = stats.api_r2 || 0;
+      const rss_acc = stats.rss_acc || 0;
+      const total_samples = (stats.api_samples || 0) + (stats.rss_samples || 0);
 
       container.innerHTML = `
     <div class="mlllib-grid">
       <div class="ml-stat">
-        <div class="ml-stat-value">${prediksi.koefisien > 0 ? "+" : ""}${prediksi.koefisien}</div>
-        <div class="ml-stat-label">Koefisien (slope)</div>
+        <div class="ml-stat-value">${(rss_acc * 100).toFixed(1)}%</div>
+        <div class="ml-stat-label">RSS Classifier Accuracy</div>
       </div>
       <div class="ml-stat">
-        <div class="ml-stat-value">${fmtRupiah(prediksi.intercept)}</div>
-        <div class="ml-stat-label">Intercept</div>
+        <div class="ml-stat-value">${fmtRupiah(api_rmse)}</div>
+        <div class="ml-stat-label">API Regressor RMSE</div>
       </div>
       <div class="ml-stat">
-        <div class="ml-stat-value">${(prediksi.r2 * 100).toFixed(1)}%</div>
-        <div class="ml-stat-label">R² Score</div>
+        <div class="ml-stat-value">${(api_r2 * 100).toFixed(1)}%</div>
+        <div class="ml-stat-label">API Regressor R²</div>
       </div>
       <div class="ml-stat">
-        <div class="ml-stat-value">${fmtRupiah(prediksi.rmse)}</div>
-        <div class="ml-stat-label">RMSE</div>
+        <div class="ml-stat-value">${total_samples}</div>
+        <div class="ml-stat-label">Total Data Dilatih</div>
       </div>
     </div>
-    <div class="ml-interpretasi">💡 ${prediksi.interpretasi || ""} | Komoditas: ${prediksi.komoditas || ""}</div>`;
+    <div class="ml-interpretasi">💡 Model terus dilatih secara incremental (online learning) setiap kali batch baru masuk ke HDFS. Update terakhir: ${stats.last_updated ? new Date(stats.last_updated).toLocaleTimeString("id-ID") : "-"}</div>`;
     }
 
     // ── Fetch Data ───────────────────────────────────────────────────────────────
@@ -435,7 +450,7 @@
         renderTren(spark.tren_harga || []);
         renderVolatilitas(spark.volatilitas || []);
         renderKorelasi(spark.korelasi_berita || []);
-        renderMLlib(spark.prediksi_mlllib || null);
+        renderMLStats(json.ml_stats || null);
 
         // Status dot hijau
         document.getElementById("status-dot").style.background =
