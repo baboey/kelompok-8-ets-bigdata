@@ -21,7 +21,7 @@ import subprocess
 
 KAFKA_BOOTSTRAP  = "localhost:9092"
 GROUP_ID         = "pangan-consumer-group"
-HDFS_BATCH_SIZE  = 24     # Flush ke HDFS setiap 24 pesan
+HDFS_BATCH_SIZE  = 8      # Flush ke HDFS setiap 8 pesan
 MAX_LOCAL_EVENTS = 50     # Simpan 50 event terakhir di local JSON
 
 # Path HDFS
@@ -178,7 +178,7 @@ def consume_rss():
             update_local_file(LOCAL_RSS_FILE, local_rss)
             print(f"  [RSS] #{rss_count} {data.get('title','?')[:60]}...")
 
-            if current_rss >= 10:
+            if current_rss >= 5:
                 with buffer_lock:
                     batch = buffer_rss.copy()
                     buffer_rss.clear()
