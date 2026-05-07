@@ -67,14 +67,14 @@ def load_data_api(spark: SparkSession):
     """Load data harga dari HDFS atau fallback file lokal."""
     schema = StructType([
         StructField("komoditas",   StringType(),  True),
-        StructField("harga",       DoubleType(),  True),
-        StructField("harga_sebelumnya", DoubleType(),  True),
+        StructField("harga",       IntegerType(), True),
+        StructField("harga_sebelumnya", IntegerType(), True),
         StructField("perubahan_persen",  DoubleType(),  True),
-        StructField("harga_baseline", DoubleType(),  True),
+        StructField("harga_baseline", IntegerType(), True),
         StructField("unit",        StringType(),  True),
         StructField("timestamp",   StringType(),  True),
         StructField("sumber",      StringType(),  True),
-        StructField("kota",        StringType(),  True),
+        StructField("kota",      StringType(),  True),
     ])
 
     # Coba HDFS dulu
@@ -282,9 +282,9 @@ def simpan_hasil(spark, df_volatilitas, df_tren, korelasi_rows, prediksi):
         "volatilitas":   [
             {
                 "komoditas":      r["komoditas"],
-                "harga_max":      int(r["harga_max"]) if r["harga_max"] else 0,
-                "harga_min":      int(r["harga_min"]) if r["harga_min"] else 0,
-                "harga_avg":      int(round(r["harga_avg"])) if r["harga_avg"] else 0,
+                "harga_max":      r["harga_max"],
+                "harga_min":      r["harga_min"],
+                "harga_avg":      round(r["harga_avg"]),
                 "volatilitas_pct": r["volatilitas_pct"],
                 "jumlah_data":    r["jumlah_data"],
             }
