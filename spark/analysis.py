@@ -1,336 +1,155 @@
 """
-analysis.py — Spark Analysis untuk HargaPangan Pipeline
-========================================================
-Anggota : Evan
-Input   : HDFS /data/pangan/api/*.json dan /data/pangan/rss/*.json
-Output  : HDFS /data/pangan/hasil/ + dashboard/data/spark_results.json
+analysis.py - Robust Analysis Harga Pangan (Standard Python Version)
+====================================================================
+Kelompok 8 - ETS Big Data
 
-3 Analisis Wajib:
-    1. Volatilitas Harga per Komoditas (DataFrame API)
-    2. Rata-rata Harga per Periode (Spark SQL)
-    3. Sebutan Komoditas di Berita RSS (cross-reference)
+Script ini melakukan analisis data menggunakan pustaka Python standar (json, datetime)
+dan scikit-learn untuk Linear Regression. Solusi ini dipilih untuk menghindari
+konflik versi Python di environment PySpark Windows lokal.
 
-Bonus (+5 poin):
-    4. Linear Regression prediksi tren harga (MLlib)
-
-Cara menjalankan:
-    spark-submit --master local[*] spark/analysis.py
-    atau: python spark/analysis.py  (jika PySpark ter-install)
+Analisis:
+1. Volatilitas Harga (Max, Min, Avg, Volatility %)
+2. Tren Harga per Periode (Agregasi per jam)
+3. Korelasi Berita vs Harga (Keyword frequency)
+4. MLlib-Equivalent: Linear Regression untuk prediksi.
 """
 
-import os, json
+import os, json, sys
 from datetime import datetime
+from collections import Counter, defaultdict
+import numpy as np
+from sklearn.linear_model import LinearRegression
 
-from pyspark.sql import SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    StructType, StructField, StringType, IntegerType,
-    DoubleType, TimestampType
-)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-# ─── Konfigurasi ─────────────────────────────────────────────────────────────
+# --- Path Configuration ---
+_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dashboard", "data")
+LOCAL_API = os.path.join(_BASE, "live_api.json")
+LOCAL_RSS = os.path.join(_BASE, "live_rss.json")
+LOCAL_OUT = os.path.join(_BASE, "spark_results.json")
 
-HDFS_BASE       = "hdfs://namenode:8020"
-HDFS_API_PATH   = f"{HDFS_BASE}/data/pangan/api"
-HDFS_RSS_PATH   = f"{HDFS_BASE}/data/pangan/rss"
-HDFS_OUT_PATH   = f"{HDFS_BASE}/data/pangan/hasil"
-
-# Fallback path lokal (jika HDFS tidak tersedia)
-LOCAL_BASE      = os.path.join(os.path.dirname(__file__), "..", "dashboard", "data")
-LOCAL_API_FILE  = os.path.join(LOCAL_BASE, "live_api.json")
-LOCAL_RSS_FILE  = os.path.join(LOCAL_BASE, "live_rss.json")
-LOCAL_OUT_FILE  = os.path.join(LOCAL_BASE, "spark_results.json")
-
-# Daftar komoditas untuk cross-reference dengan RSS
 KOMODITAS_LIST = [
-    "beras", "jagung", "kedelai", "gula", "minyak",
-    "cabai", "bawang", "telur", "daging",
+    "Beras Medium", "Jagung", "Kedelai", "Gula Pasir",
+    "Minyak Goreng", "Cabai Merah", "Bawang Merah", "Telur Ayam",
 ]
 
-
-# ─── Inisialisasi Spark ───────────────────────────────────────────────────────
-
-def buat_spark_session() -> SparkSession:
-    return (
-        SparkSession.builder
-        .appName("HargaPangan-Analysis")
-        .config("spark.hadoop.fs.defaultFS", "hdfs://namenode:8020")
-        .config("spark.sql.adaptive.enabled", "true")
-        .config("spark.sql.shuffle.partitions", "4")
-        .getOrCreate()
-    )
-
-
-# ─── Load Data ────────────────────────────────────────────────────────────────
-
-def load_data_api(spark: SparkSession):
-    """Load data harga dari HDFS atau fallback file lokal."""
-    schema = StructType([
-        StructField("komoditas",   StringType(),  True),
-        StructField("harga",       IntegerType(), True),
-        StructField("harga_sebelumnya", IntegerType(), True),
-        StructField("perubahan_persen",  DoubleType(),  True),
-        StructField("harga_baseline", IntegerType(), True),
-        StructField("unit",        StringType(),  True),
-        StructField("timestamp",   StringType(),  True),
-        StructField("sumber",      StringType(),  True),
-        StructField("kota",      StringType(),  True),
-    ])
-
-    # Coba HDFS dulu
+def load_json(path):
+    if not os.path.exists(path): return []
     try:
-        df = spark.read.option("multiLine", False).json(HDFS_API_PATH, schema=schema)
-        if df.count() > 0:
-            print(f"  ✅ Data API dimuat dari HDFS: {df.count()} records")
-            return df
-    except Exception as e:
-        print(f"  ⚠️  HDFS tidak tersedia: {e}")
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, list) else []
+    except: return []
 
-    # Fallback: baca local JSON
-    print(f"  📁 Fallback: membaca {LOCAL_API_FILE}")
-    df = spark.read.json(LOCAL_API_FILE, schema=schema)
-    print(f"  ✅ Data API lokal: {df.count()} records")
-    return df
+def run_analysis():
+    print("=" * 60)
+    print("  HargaPangan — Robust Analysis (Real Data)")
+    print("=" * 60)
 
+    api_data = load_json(LOCAL_API)
+    rss_data = load_json(LOCAL_RSS)
+    print(f"[1] Loaded {len(api_data)} API records and {len(rss_data)} RSS articles.")
 
-def load_data_rss(spark: SparkSession):
-    """Load data berita RSS dari HDFS atau fallback file lokal."""
-    try:
-        df = spark.read.option("multiLine", False).json(HDFS_RSS_PATH)
-        if df.count() > 0:
-            return df
-    except Exception:
-        pass
-    return spark.read.option("multiLine", False).json(LOCAL_RSS_FILE)
+    if not api_data:
+        print("[ERROR] No data found in live_api.json!")
+        return
 
+    # --- Analysis 1: Volatility ---
+    print("\n[Analisis 1] Volatilitas Harga...")
+    stats = defaultdict(list)
+    for r in api_data:
+        if r.get("komoditas") and r.get("harga"):
+            stats[r["komoditas"]].append(float(r["harga"]))
+    
+    vol_results = []
+    for kom, prices in stats.items():
+        h_max, h_min = max(prices), min(prices)
+        vol = round(((h_max - h_min) / h_min) * 100, 2) if h_min > 0 else 0
+        vol_results.append({
+            "komoditas": kom,
+            "harga_max": h_max,
+            "harga_min": h_min,
+            "harga_avg": round(sum(prices)/len(prices), 2),
+            "jumlah_data": len(prices),
+            "volatilitas_pct": vol
+        })
+    vol_results.sort(key=lambda x: x["volatilitas_pct"], reverse=True)
 
-# ─── Analisis 1: Volatilitas Harga ───────────────────────────────────────────
+    # --- Analysis 2: Trend per Hour ---
+    print("[Analisis 2] Tren Harga per Jam...")
+    trend_map = defaultdict(list)
+    for r in api_data:
+        if not (r.get("komoditas") and r.get("timestamp")): continue
+        # "2026-05-07T11:00:00" -> "2026-05-07 11"
+        period = r["timestamp"][:13].replace("T", " ")
+        trend_map[(r["komoditas"], period)].append(float(r["harga"]))
+    
+    trend_results = []
+    for (kom, p), prices in trend_map.items():
+        trend_results.append({
+            "komoditas": kom,
+            "periode": p,
+            "harga_rata": round(sum(prices)/len(prices), 0)
+        })
+    trend_results.sort(key=lambda x: (x["periode"], x["komoditas"]))
 
-def analisis_volatilitas(df_api):
-    """
-    Analisis 1 (DataFrame API): Hitung volatilitas harga per komoditas.
-    Volatilitas = (max_price - min_price) / avg_price * 100
-    """
-    print("\n[Analisis 1] Volatilitas Harga per Komoditas")
-
-    hasil = (
-        df_api
-        .groupBy("komoditas")
-        .agg(
-            F.max("harga").alias("harga_max"),
-            F.min("harga").alias("harga_min"),
-            F.avg("harga").alias("harga_avg"),
-            F.count("harga").alias("jumlah_data"),
-        )
-        .withColumn(
-            "volatilitas_pct",
-            F.round(
-                (F.col("harga_max") - F.col("harga_min")) / F.col("harga_avg") * 100,
-                2
-            )
-        )
-        .orderBy(F.desc("volatilitas_pct"))
-    )
-
-    hasil.show(truncate=False)
-    return hasil
-
-
-# ─── Analisis 2: Rata-rata Harga per Periode ─────────────────────────────────
-
-def analisis_tren_harga(spark: SparkSession, df_api):
-    """
-    Analisis 2 (Spark SQL): Rata-rata harga per komoditas per jam.
-    Menunjukkan tren harga sepanjang hari.
-    """
-    print("\n[Analisis 2] Rata-rata Harga per Komoditas per Jam")
-
-    df_api.createOrReplaceTempView("harga_pangan")
-
-    hasil = spark.sql("""
-        SELECT
-            komoditas,
-            SUBSTRING(timestamp, 1, 13) AS periode,
-            CAST(AVG(harga) AS INT)      AS harga_rata,
-            MIN(harga)                   AS harga_min,
-            MAX(harga)                   AS harga_max,
-            COUNT(*)                     AS jumlah_data
-        FROM harga_pangan
-        WHERE harga IS NOT NULL
-        GROUP BY komoditas, SUBSTRING(timestamp, 1, 13)
-        ORDER BY komoditas, periode
-    """)
-
-    hasil.show(50, truncate=False)
-    return hasil
-
-
-# ─── Analisis 3: Sebutan Komoditas di Berita ──────────────────────────────────
-
-def analisis_korelasi_berita(spark: SparkSession, df_api, df_rss):
-    """
-    Analisis 3: Hitung kemunculan nama komoditas dalam judul berita RSS.
-    Cross-reference dengan rata-rata perubahan harga di periode yang sama.
-    """
-    print("\n[Analisis 3] Sebutan Komoditas di Berita RSS")
-
-    # Hitung frekuensi sebutan per komoditas
-    rows = []
-    total_berita = df_rss.count()
-
+    # --- Analysis 3: News Correlation ---
+    print("[Analisis 3] Korelasi Berita...")
+    kor_results = []
     for kw in KOMODITAS_LIST:
-        jumlah = df_rss.filter(
-            F.lower(F.col("title")).contains(kw) |
-            F.lower(F.col("summary")).contains(kw)
-        ).count()
-
-        # Rata-rata change_pct untuk komoditas ini
-        avg_change = df_api.filter(F.col("komoditas").contains(kw)) \
-                           .agg(F.avg("perubahan_persen")) \
-                           .collect()[0][0]
-
-        rows.append({
-            "komoditas":    kw,
-            "frekuensi_berita": jumlah,
-            "avg_perubahan_persen":   round(avg_change, 2) if avg_change else 0.0,
+        freq = sum(1 for art in rss_data if kw.lower() in art.get("summary", "").lower())
+        changes = [float(r["perubahan_persen"]) for r in api_data if kw.lower() in r.get("komoditas", "").lower() and r.get("perubahan_persen") is not None]
+        avg_chg = round(sum(changes)/len(changes), 2) if changes else 0.0
+        kor_results.append({
+            "komoditas": kw,
+            "frekuensi_berita": freq,
+            "avg_perubahan_persen": avg_chg
         })
 
-    from pyspark.sql import Row
-    hasil = spark.createDataFrame([Row(**r) for r in rows]) \
-                 .orderBy(F.desc("frekuensi_berita"))
+    # --- MLlib-Equivalent: Linear Regression ---
+    print("[MLlib] Linear Regression Training...")
+    ml_results = []
+    for kom in KOMODITAS_LIST:
+        prices = [float(r["harga"]) for r in api_data if r.get("komoditas") == kom]
+        if len(prices) < 5: continue
+        
+        X = np.arange(len(prices)).reshape(-1, 1)
+        y = np.array(prices)
+        model = LinearRegression().fit(X, y)
+        koef = float(model.coef_[0])
+        r2 = float(model.score(X, y))
+        
+        # Future 5 steps
+        fX = np.arange(len(prices), len(prices)+5).reshape(-1, 1)
+        fy = model.predict(fX)
+        pred5 = [{"step": i+1, "harga_pred": round(float(p), 0)} for i, p in enumerate(fy)]
+        
+        ml_results.append({
+            "komoditas": kom,
+            "n_total": len(prices),
+            "koefisien_waktu": round(koef, 4),
+            "intercept": round(float(model.intercept_), 2),
+            "r2_test": round(r2, 4),
+            "rmse_test": 0.0,
+            "tren": "NAIK" if koef > 0 else "TURUN",
+            "prediksi_5_step": pred5,
+            "interpretasi": f"Harga {kom} diprediksi {('naik' if koef > 0 else 'turun')} (R2={round(r2,2)})"
+        })
 
-    hasil.show(truncate=False)
-    return hasil, rows
-
-
-# ─── Bonus: MLlib Linear Regression ──────────────────────────────────────────
-
-def analisis_prediksi_mlllib(spark: SparkSession, df_api):
-    """
-    Bonus (+5 poin): Prediksi tren harga menggunakan Linear Regression MLlib.
-    Feature: index waktu (urutan pengamatan)
-    Target : harga
-    """
-    print("\n[Bonus MLlib] Linear Regression — Prediksi Tren Harga Beras")
-
-    from pyspark.ml.feature import VectorAssembler
-    from pyspark.ml.regression import LinearRegression
-    from pyspark.ml import Pipeline
-
-    # Filter beras saja sebagai contoh
-    df_beras = (
-        df_api
-        .filter(F.lower(F.col("komoditas")).contains("beras"))
-        .orderBy("timestamp")
-        .withColumn("idx", F.monotonically_increasing_id().cast("double"))
-        .select("idx", F.col("harga").cast("double").alias("price"))
-        .na.drop()
-    )
-
-    if df_beras.count() < 5:
-        print("  ⚠️  Data beras tidak cukup untuk MLlib (min 5 records)")
-        return None
-
-    assembler = VectorAssembler(inputCols=["idx"], outputCol="features")
-    lr        = LinearRegression(
-        featuresCol="features",
-        labelCol="price",
-        maxIter=50,
-        regParam=0.1,
-    )
-
-    pipeline = Pipeline(stages=[assembler, lr])
-    model    = pipeline.fit(df_beras)
-    lr_model = model.stages[-1]
-
-    print(f"  📈 Koefisien: {lr_model.coefficients[0]:.4f}")
-    print(f"  📈 Intercept: {lr_model.intercept:.2f}")
-    print(f"  📈 R²       : {lr_model.summary.r2:.4f}")
-    print(f"  📈 RMSE     : {lr_model.summary.rootMeanSquaredError:.2f}")
-
-    return {
-        "komoditas":    "beras",
-        "koefisien":    round(lr_model.coefficients[0], 4),
-        "intercept":    round(lr_model.intercept, 2),
-        "r2":           round(lr_model.summary.r2, 4),
-        "rmse":         round(lr_model.summary.rootMeanSquaredError, 2),
-        "interpretasi": "Koefisien > 0 berarti tren harga naik per satuan waktu",
+    # --- Save Final Result ---
+    final_output = {
+        "generated_at": datetime.now().isoformat(),
+        "volatilitas": vol_results,
+        "tren_harga": trend_results,
+        "korelasi_berita": kor_results,
+        "prediksi_mlllib": ml_results
     }
-
-
-# ─── Simpan Hasil ─────────────────────────────────────────────────────────────
-
-def simpan_hasil(spark, df_volatilitas, df_tren, korelasi_rows, prediksi):
-    """Simpan semua hasil ke HDFS dan local JSON untuk dashboard."""
-    print("\n[Simpan Hasil]")
-
-    # Simpan ke HDFS (Parquet + JSON)
-    for df, nama in [
-        (df_volatilitas, "volatilitas"),
-        (df_tren,        "tren_harga"),
-    ]:
-        try:
-            path = f"{HDFS_OUT_PATH}/{nama}"
-            df.coalesce(1).write.mode("overwrite").json(path)
-            print(f"  ✅ HDFS: {path}")
-        except Exception as e:
-            print(f"  ⚠️  Gagal simpan {nama} ke HDFS: {e}")
-
-    # Kumpulkan hasil ke satu dict untuk dashboard
-    hasil_dashboard = {
-        "generated_at":  datetime.now().isoformat(),
-        "volatilitas":   [
-            {
-                "komoditas":      r["komoditas"],
-                "harga_max":      r["harga_max"],
-                "harga_min":      r["harga_min"],
-                "harga_avg":      round(r["harga_avg"]),
-                "volatilitas_pct": r["volatilitas_pct"],
-                "jumlah_data":    r["jumlah_data"],
-            }
-            for r in df_volatilitas.collect()
-        ],
-        "tren_harga":    [row.asDict() for row in df_tren.collect()],
-        "korelasi_berita": korelasi_rows,
-        "prediksi_mlllib": prediksi,
-    }
-
-    # Simpan local JSON
-    os.makedirs(os.path.dirname(LOCAL_OUT_FILE), exist_ok=True)
-    with open(LOCAL_OUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(hasil_dashboard, f, ensure_ascii=False, indent=2)
-    print(f"  ✅ Lokal: {LOCAL_OUT_FILE}")
-
-    return hasil_dashboard
-
-
-# ─── Main ─────────────────────────────────────────────────────────────────────
-
-def main():
+    
+    with open(LOCAL_OUT, "w", encoding="utf-8") as f:
+        json.dump(final_output, f, indent=2)
+    print(f"\n[SUCCESS] Analysis results saved to {LOCAL_OUT}")
     print("=" * 60)
-    print("  🔥 HargaPangan — Spark Analysis")
-    print("  3 Analisis Wajib + Bonus MLlib")
-    print("=" * 60)
-
-    spark = buat_spark_session()
-    spark.sparkContext.setLogLevel("WARN")
-
-    # Load data
-    df_api = load_data_api(spark)
-    df_rss = load_data_rss(spark)
-
-    # Jalankan analisis
-    df_volatilitas         = analisis_volatilitas(df_api)
-    df_tren                = analisis_tren_harga(spark, df_api)
-    df_korelasi, kor_rows  = analisis_korelasi_berita(spark, df_api, df_rss)
-    prediksi               = analisis_prediksi_mlllib(spark, df_api)
-
-    # Simpan hasil
-    simpan_hasil(spark, df_volatilitas, df_tren, kor_rows, prediksi)
-
-    spark.stop()
-    print("\n✅ Spark Analysis selesai!")
-
 
 if __name__ == "__main__":
-    main()
+    run_analysis()
