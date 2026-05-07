@@ -93,7 +93,7 @@
     <div class="card">
       <div class="card-title">
         <span class="icon">📰</span>
-        Berita Ekonomi Pangan
+        Berita Ekonomi
         <span style="
               margin-left: auto;
               font-size: 0.72rem;
@@ -354,7 +354,7 @@
             if (a.ml_sentiment_pred === "positive") sentColor = "#238636";
             else if (a.ml_sentiment_pred === "negative") sentColor = "#da3633";
             const sentBadge = a.ml_sentiment_pred ? `<span style="background:${sentColor};color:white;padding:2px 8px;border-radius:12px;font-size:0.65rem;margin-left:auto;">🤖 ML: ${a.ml_sentiment_pred.toUpperCase()}</span>` : "";
-            
+
             return `
     <a class="news-item" href="${a.link || "#"}" target="_blank" rel="noopener" style="display:block;">
       <div class="news-title">${a.title || "(Tanpa judul)"}</div>

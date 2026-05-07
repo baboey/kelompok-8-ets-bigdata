@@ -19,6 +19,7 @@ TOPIC           = "pangan-rss"
 
 RSS_FEEDS = [
     {"url": "https://rss.bisnis.com/",        "source": "bisnis.com"},
+    {"url": "https://www.cnnindonesia.com/ekonomi/rss", "source": "cnnindonesia"}
 ]
 
 KEYWORDS = [
