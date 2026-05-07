@@ -5,8 +5,9 @@
 ---
 
 ## Anggota Tim
+
 | NRP | Nama | Peran |
-| --- |------|-------| 
+| --- |------|-------|
 | 5027231007 | Thio Billy | Producer API |
 | 5027241026 | Evan Christian Nainggolan | Spark Analysis |
 | 5027241039 | Rayka Dharma Pranandita | DevOps + Dashboard |
@@ -22,6 +23,7 @@
 "Komoditas mana yang paling bergejolak harganya hari ini, dan apakah ada berita ekonomi yang menjelaskan penyebabnya?"
 
 **Justifikasi sumber data:**
+
 - Producer API menggunakan simulator realistis dengan model random walk berbasis harga pasar riil Indonesia (April 2026). Hal ini dilakukan karena API harga pangan publik tidak menyediakan endpoint yang stabil dan terdokumentasi untuk akses terprogram.
 - Producer RSS menggunakan feed Bisnis.com dan Kompas.com (kategori ekonomi/money) sebagai sumber berita pangan secara real-time.
 
@@ -30,6 +32,7 @@
 ## Arsitektur Sistem
 
 Alur data dalam pipeline:
+
 1. Producer menghasilkan data dan mengirimkannya ke Kafka.
 2. Consumer membaca dari Kafka dan secara real-time menulis ke file JSON lokal agar dapat dibaca langsung oleh Dashboard.
 3. Consumer juga melakukan batching data dan menyimpannya ke HDFS.
@@ -60,6 +63,7 @@ Alur data dalam pipeline:
 ## Cara Menjalankan
 
 ### Prasyarat
+
 - Docker Desktop (min. RAM 6GB dialokasikan)
 - Python 3.12 atau yang lebih baru
 - pip
@@ -79,10 +83,12 @@ docker compose -f docker-compose-hadoop.yml up -d
 ```
 
 Verifikasi:
-- HDFS Web UI: http://localhost:9870
+
+- HDFS Web UI: <http://localhost:9870>
 - Pastikan container namenode berjalan: `docker ps | findstr namenode`
 
 Buat direktori HDFS untuk data:
+
 ```bash
 docker exec namenode hdfs dfs -mkdir -p /data/pangan/api
 docker exec namenode hdfs dfs -mkdir -p /data/pangan/rss
@@ -97,7 +103,8 @@ docker compose -f docker-compose-kafka.yml up -d
 ```
 
 Verifikasi:
-- Kafka UI: http://localhost:8080
+
+- Kafka UI: <http://localhost:8080>
 - Pastikan broker berjalan: `docker ps | findstr kafka-broker`
 
 ### 4. Jalankan Pipeline (di terminal terpisah)
@@ -105,16 +112,19 @@ Verifikasi:
 Karena sistem berjalan secara terus-menerus, buka terminal baru untuk masing-masing perintah berikut:
 
 **Terminal 1 — Consumer HDFS:**
+
 ```bash
 $env:PYTHONUTF8=1; python pipeline/consumer_to_hdfs.py
 ```
 
 **Terminal 2 — Producer API:**
+
 ```bash
 $env:PYTHONUTF8=1; python pipeline/producer_api.py
 ```
 
 **Terminal 3 — Producer RSS:**
+
 ```bash
 $env:PYTHONUTF8=1; python pipeline/producer_rss.py
 ```
@@ -124,19 +134,22 @@ $env:PYTHONUTF8=1; python pipeline/producer_rss.py
 ### 5. Jalankan Spark Analysis
 
 Tunggu beberapa saat hingga data terkumpul di HDFS dari consumer, kemudian jalankan:
+
 ```bash
 python spark/analysis.py
 ```
+
 *(Catatan: Proses ini dapat dijalankan secara berkala untuk memperbarui hasil analitik)*
 
 ### 6. Jalankan Flask Dashboard
 
 **Terminal 4:**
+
 ```bash
 python dashboard/app.py
 ```
 
-Buka browser dan akses: **http://localhost:5000**
+Buka browser dan akses: **<http://localhost:5000>**
 
 ---
 
@@ -150,7 +163,7 @@ ets/
 ├── requirements.txt              # Python dependencies
 ├── .gitignore
 │
-├── pipeline/
+├── kafka/
 │   ├── producer_api.py           # Simulator harga komoditas (Billy)
 │   ├── producer_rss.py           # RSS feed reader (Akbar)
 │   └── consumer_to_hdfs.py       # Consumer -> HDFS & Local JSON (Akbar)
@@ -174,10 +187,10 @@ ets/
 
 | Service | URL / Port | Keterangan |
 |---------|------------|------------|
-| HDFS Web UI | http://localhost:9870 | Monitor HDFS, browse files |
-| YARN ResourceManager | http://localhost:8088 | Monitor jobs YARN |
-| Kafka UI | http://localhost:8080 | Monitor topics & consumer groups |
-| Flask Dashboard | http://localhost:5000 | Dashboard utama |
+| HDFS Web UI | <http://localhost:9870> | Monitor HDFS, browse files |
+| YARN ResourceManager | <http://localhost:8088> | Monitor jobs YARN |
+| Kafka UI | <http://localhost:8080> | Monitor topics & consumer groups |
+| Flask Dashboard | <http://localhost:5000> | Dashboard utama |
 | Kafka Broker | localhost:9092 | Endpoint untuk producer/consumer |
 | HDFS RPC | localhost:8020 | Endpoint koneksi Spark/Python ke HDFS |
 
@@ -216,22 +229,38 @@ Dashboard membaca data yang diperbarui secara otomatis setiap 30 detik.
 
 ---
 
-## Troubleshooting
+## Screenshot
 
-1. **Error ModuleNotFoundError: No module named 'kafka'**
-   Pastikan menggunakan module `kafka-python-ng` untuk kompatibilitas versi Python 3.12+. Nama folder producer juga diganti menjadi `pipeline` untuk menghindari bentrokan namespace.
+### HDFS Web UI (localhost:9870)
 
-2. **Data tidak muncul di Dashboard**
-   Pastikan consumer berjalan. Consumer akan membuat dan memperbarui file `live_api.json` di dalam folder `dashboard/data/`. 
-   Jalankan `spark/analysis.py` minimal satu kali untuk memunculkan data analitik.
+> *(Tambahkan screenshot HDFS Web UI yang menampilkan file JSON di /data/pangan/api/ dan /data/pangan/rss/)*
 
-3. **HDFS permission denied**
-   Jalankan perintah berikut untuk membuka akses write ke HDFS:
-   `docker exec namenode hdfs dfs -chmod -R 777 /data`
+### Kafka Consumer Output
+
+> *(Tambahkan screenshot terminal consumer_to_hdfs.py yang menampilkan event masuk dari kedua topic)*
+
+### Dashboard (localhost:5000)
+
+> *(Tambahkan screenshot dashboard berjalan dengan data nyata dari Spark dan Kafka)*
 
 ---
 
-## Catatan Tambahan
+## Tantangan
 
-- Direktori `dashboard/data/` berisi file yang dihasilkan saat runtime dan tidak dimasukkan ke dalam version control.
-- Sistem didesain agar tahan terhadap interupsi; jika consumer dihentikan, proses pembacaan pesan Kafka akan dilanjutkan dari offset terakhir tanpa data yang hilang.
+1. **Error ModuleNotFoundError: No module named 'kafka'**
+   Mengubah module kafka ke module `kafka-python-ng` untuk kompatibilitas versi Python 3.12+. Nama folder producer juga diganti menjadi `pipeline` untuk menghindari bentrokan namespace.
+2. **API RSS Feed Tidak Dapat Diakses**
+   ![alt text](images/image2.png)
+   Mengubah link rss dari `https://rss.bisnis.com/feed/rss2/ekonomi` ke `https://rss.bisnis.com/`
+3. **API REAL-TIME Tidak Berfungsi**
+   Bukti bahwa API yang disediakan tidak berfungsi:
+
+- **API BADAN PANGAN**
+![alt text](images/476e15db-983a-44d8-8a2f-e7a702112c20.jpg)
+![alt text](images/4754a679-27d8-4ed6-aa01-33a12e9e5ed6.jpg)
+![alt text](images/image.png)
+
+- **API WORLD BANK**
+![alt text](images/image-1.png)
+
+---

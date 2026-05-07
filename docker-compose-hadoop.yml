@@ -94,6 +94,30 @@ services:
     depends_on:
       - resourcemanager
 
+  # ── HDFS Init (one-shot: buat folder /data/pangan) ──────
+  hdfs-init:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: hdfs-init
+    restart: "no"                        # hanya jalan sekali
+    env_file:
+      - ./hadoop.env
+    networks:
+      - bigdata-net
+    depends_on:
+      namenode:
+        condition: service_healthy       # tunggu namenode benar-benar siap
+    entrypoint: >
+      /bin/bash -c "
+        echo '[hdfs-init] Menunggu HDFS safe mode keluar...' &&
+        hdfs dfsadmin -safemode wait &&
+        echo '[hdfs-init] Membuat direktori /data/pangan...' &&
+        hdfs dfs -mkdir -p /data/pangan/api &&
+        hdfs dfs -mkdir -p /data/pangan/rss &&
+        hdfs dfs -mkdir -p /data/pangan/hasil &&
+        hdfs dfs -chmod -R 777 /data/pangan &&
+        echo '[hdfs-init] Selesai! Direktori HDFS siap.'
+      "
+
 volumes:
   hadoop_namenode:
   hadoop_datanode:

@@ -54,6 +54,7 @@ def buat_spark_session() -> SparkSession:
     return (
         SparkSession.builder
         .appName("HargaPangan-Analysis")
+        .config("spark.hadoop.fs.defaultFS", "hdfs://namenode:8020")
         .config("spark.sql.adaptive.enabled", "true")
         .config("spark.sql.shuffle.partitions", "4")
         .getOrCreate()
@@ -78,7 +79,7 @@ def load_data_api(spark: SparkSession):
 
     # Coba HDFS dulu
     try:
-        df = spark.read.json(HDFS_API_PATH, schema=schema)
+        df = spark.read.option("multiLine", False).json(HDFS_API_PATH, schema=schema)
         if df.count() > 0:
             print(f"  ✅ Data API dimuat dari HDFS: {df.count()} records")
             return df
@@ -95,12 +96,12 @@ def load_data_api(spark: SparkSession):
 def load_data_rss(spark: SparkSession):
     """Load data berita RSS dari HDFS atau fallback file lokal."""
     try:
-        df = spark.read.json(HDFS_RSS_PATH)
+        df = spark.read.option("multiLine", False).json(HDFS_RSS_PATH)
         if df.count() > 0:
             return df
     except Exception:
         pass
-    return spark.read.json(LOCAL_RSS_FILE)
+    return spark.read.option("multiLine", False).json(LOCAL_RSS_FILE)
 
 
 # ─── Analisis 1: Volatilitas Harga ───────────────────────────────────────────

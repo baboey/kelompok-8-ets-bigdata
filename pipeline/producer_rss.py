@@ -18,8 +18,7 @@ KAFKA_BOOTSTRAP = "localhost:9092"
 TOPIC           = "pangan-rss"
 
 RSS_FEEDS = [
-    {"url": "https://rss.bisnis.com/feed/rss2/ekonomi",    "source": "bisnis.com"},
-    {"url": "https://rss.kompas.com/feed/kompas.com/money", "source": "kompas.com"},
+    {"url": "https://rss.bisnis.com/",        "source": "bisnis.com"},
 ]
 
 KEYWORDS = [
