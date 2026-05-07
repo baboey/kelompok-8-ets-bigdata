@@ -7,7 +7,13 @@ import math
 from datetime import datetime
 from kafka import KafkaProducer
 from kafka.errors import KafkaError
-import schedule
+try:
+    import schedule
+except ModuleNotFoundError as e:
+    raise SystemExit(
+        "Dependency 'schedule' belum ter-install di Python environment yang aktif. "
+        "Jalankan: pip install -r requirements.txt"
+    ) from e
 from tenacity import retry, wait_exponential, stop_after_attempt
 
 # ============================================================
