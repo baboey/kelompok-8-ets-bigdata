@@ -189,7 +189,7 @@
     // ── Konstanta ─────────────────────────────────────────────────────────────
     const REFRESH_INTERVAL = 30_000;
     const KOMODITAS_EMOJI = {
-      "beras medium": "🌾", "jagung": "🌽", "kedelai": "🫘",
+      "beras": "🌾", "jagung": "🌽", "kedelai": "🫘",
       "gula pasir": "🍬", "minyak goreng": "🫙", "cabai merah": "🌶️",
       "bawang merah": "🧅", "telur ayam": "🥚",
     };
@@ -238,7 +238,7 @@
     function renderTren(trenData) {
       if (!trenData || !trenData.length) return;
       const canvas = document.getElementById("chart-tren");
-      const komoditas = [...new Set(trenData.map(r => r.komoditas))].slice(0, 4);
+      const komoditas = [...new Set(trenData.map(r => r.komoditas))];
       const periods = [...new Set(trenData.map(r => r.periode))].sort().slice(-12);
       const datasets = komoditas.map((com, i) => ({
         label: com,

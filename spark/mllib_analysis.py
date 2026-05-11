@@ -50,7 +50,7 @@ LOCAL_API = os.path.join(_BASE, "live_api.json")
 LOCAL_OUT = os.path.join(_BASE, "spark_results.json")
 
 KOMODITAS_LIST = [
-    "Beras Medium", "Jagung", "Kedelai", "Gula Pasir",
+    "Beras", "Jagung", "Kedelai", "Gula Pasir",
     "Minyak Goreng", "Cabai Merah", "Bawang Merah", "Telur Ayam",
 ]
 MIN_ROWS = 5

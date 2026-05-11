@@ -29,6 +29,47 @@ FILE_RSS      = os.path.join(DATA_DIR, "live_rss.json")
 FILE_SPARK    = os.path.join(DATA_DIR, "spark_results.json")
 
 
+# Baseline komoditas (untuk memastikan 8 komoditas selalu tampil sejak awal)
+_KOMODITAS_ORDER = [
+    "Bawang Merah",
+    "Beras",
+    "Cabai Merah",
+    "Gula Pasir",
+    "Jagung",
+    "Kedelai",
+    "Minyak Goreng",
+    "Telur Ayam",
+]
+
+_KOMODITAS_BASELINE = {
+    "Beras": 13500,
+    "Jagung": 6500,
+    "Kedelai": 14000,
+    "Gula Pasir": 16500,
+    "Minyak Goreng": 19000,
+    "Cabai Merah": 45000,
+    "Bawang Merah": 38000,
+    "Telur Ayam": 29000,
+}
+
+
+_KOMODITAS_CANONICAL = {c.lower(): c for c in _KOMODITAS_ORDER}
+_KOMODITAS_ALIASES = {
+    "beras medium": "Beras",
+    "beras": "Beras",
+}
+
+
+def _normalize_komoditas(name: str) -> str:
+    if not name:
+        return ""
+    key = str(name).strip().lower()
+    key = " ".join(key.split())
+    key = _KOMODITAS_ALIASES.get(key, key)
+    canonical = _KOMODITAS_CANONICAL.get(str(key).lower())
+    return canonical if canonical else str(name).strip()
+
+
 def baca_json(filepath: str, default=None):
     """Baca file JSON dengan fallback jika file belum ada."""
     try:
@@ -43,9 +84,22 @@ def harga_terkini(data_list: list) -> dict:
     Dari list events harga, ambil harga terkini per komoditas.
     Return dict: {komoditas: {harga, perubahan_persen, kota, timestamp}}
     """
+    # Seed default agar 8 komoditas selalu muncul di UI.
+    # Akan ditimpa ketika data real dari Kafka consumer sudah masuk.
     terkini = {}
+    for com in _KOMODITAS_ORDER:
+        baseline = _KOMODITAS_BASELINE.get(com, 0)
+        terkini[com] = {
+            "harga": baseline,
+            "perubahan_persen": 0.0,
+            "trend": "➡️ stabil",
+            "kota": "Nasional",
+            "timestamp": "",
+            "harga_baseline": baseline,
+        }
+
     for item in data_list:
-        com = item.get("komoditas", "")
+        com = _normalize_komoditas(item.get("komoditas", ""))
         if com:
             # Tentukan trend berdasarkan perubahan_persen
             pct = item.get("perubahan_persen", 0)
@@ -57,7 +111,7 @@ def harga_terkini(data_list: list) -> dict:
                 "trend":                trend,
                 "kota":                 item.get("kota", ""),
                 "timestamp":            item.get("timestamp", ""),
-                "harga_baseline":       item.get("harga_baseline", 0),
+                "harga_baseline":       item.get("harga_baseline", _KOMODITAS_BASELINE.get(com, 0)),
             }
     return terkini
 
@@ -74,11 +128,19 @@ def index():
 def api_prices():
     """Data harga live dari Kafka consumer (50 event terakhir)."""
     data = baca_json(FILE_API, default=[])
+    data_norm = [
+        {
+            **item,
+            "komoditas": _normalize_komoditas(item.get("komoditas", "")) or item.get("komoditas", ""),
+        }
+        for item in (data or [])
+        if isinstance(item, dict)
+    ]
     return jsonify({
         "status":   "ok",
-        "count":    len(data),
-        "data":     data,
-        "terkini":  harga_terkini(data),
+        "count":    len(data_norm),
+        "data":     data_norm,
+        "terkini":  harga_terkini(data_norm),
         "updated":  datetime.now(timezone(timedelta(hours=7))).isoformat(),
     })
 
@@ -112,12 +174,21 @@ def api_data():
     news_raw    = baca_json(FILE_RSS,   default=[])
     spark_raw   = baca_json(FILE_SPARK, default={})
 
+    prices_norm = [
+        {
+            **item,
+            "komoditas": _normalize_komoditas(item.get("komoditas", "")) or item.get("komoditas", ""),
+        }
+        for item in (prices_raw or [])
+        if isinstance(item, dict)
+    ]
+
     return jsonify({
         "status":       "ok",
         "updated":      datetime.now(timezone(timedelta(hours=7))).isoformat(),
         "prices": {
-            "live":     prices_raw[-50:] if prices_raw else [],
-            "terkini":  harga_terkini(prices_raw),
+            "live":     prices_norm[-50:] if prices_norm else [],
+            "terkini":  harga_terkini(prices_norm),
         },
         "news":         news_raw[-20:] if news_raw else [],
         "spark":        spark_raw,

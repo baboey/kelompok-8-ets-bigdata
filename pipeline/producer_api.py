@@ -21,7 +21,7 @@ from tenacity import retry, wait_exponential, stop_after_attempt
 # Harga baseline berdasarkan data BULOG / BPS terkini
 # ============================================================
 KOMODITAS_CONFIG = {
-    "Beras Medium":     {"harga_dasar": 13500, "std": 200,  "unit": "kg"},
+    "Beras":     {"harga_dasar": 13500, "std": 200,  "unit": "kg"},
     "Jagung":           {"harga_dasar": 6500,  "std": 150,  "unit": "kg"},
     "Kedelai":          {"harga_dasar": 14000, "std": 300,  "unit": "kg"},
     "Gula Pasir":       {"harga_dasar": 16500, "std": 250,  "unit": "kg"},
