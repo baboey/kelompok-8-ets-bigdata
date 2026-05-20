@@ -1,0 +1,129 @@
+
+# ============================================================
+# HargaPangan — Hadoop HDFS/YARN Cluster
+# Referensi: Materi Pertemuan 4 — Arsitektur Hadoop
+# Jalankan: docker compose -f docker-compose-hadoop.yml up -d
+# ============================================================
+
+services:
+
+  # ── NameNode (Master HDFS) ──────────────────────────────
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: unless-stopped
+    ports:
+      - "9870:9870"   # HDFS Web UI
+      - "8020:8020"   # HDFS RPC (untuk koneksi Python / Spark)
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+    environment:
+      - CLUSTER_NAME=hargapangan-cluster
+    env_file:
+      - ./hadoop.env
+    networks:
+      - bigdata-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── DataNode (Worker HDFS) ──────────────────────────────
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    restart: unless-stopped
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    env_file:
+      - ./hadoop.env
+    networks:
+      - bigdata-net
+    depends_on:
+      - namenode
+
+  # ── ResourceManager (YARN) ──────────────────────────────
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    container_name: resourcemanager
+    restart: unless-stopped
+    ports:
+      - "8088:8088"   # YARN Web UI
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870 datanode:9864"
+    env_file:
+      - ./hadoop.env
+    networks:
+      - bigdata-net
+    depends_on:
+      - namenode
+      - datanode
+
+  # ── NodeManager (YARN Worker) ───────────────────────────
+  nodemanager:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    container_name: nodemanager
+    restart: unless-stopped
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870 datanode:9864 resourcemanager:8088"
+    env_file:
+      - ./hadoop.env
+    networks:
+      - bigdata-net
+    depends_on:
+      - resourcemanager
+
+  # ── History Server (MapReduce Job History) ──────────────
+  historyserver:
+    image: bde2020/hadoop-historyserver:2.0.0-hadoop3.2.1-java8
+    container_name: historyserver
+    restart: unless-stopped
+    ports:
+      - "8188:8188"   # History Server Web UI
+    volumes:
+      - hadoop_historyserver:/hadoop/yarn/timeline
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870 datanode:9864 resourcemanager:8088"
+    env_file:
+      - ./hadoop.env
+    networks:
+      - bigdata-net
+    depends_on:
+      - resourcemanager
+
+  # ── HDFS Init (one-shot: buat folder /data/pangan) ──────
+  hdfs-init:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: hdfs-init
+    restart: "no"                        # hanya jalan sekali
+    env_file:
+      - ./hadoop.env
+    networks:
+      - bigdata-net
+    depends_on:
+      namenode:
+        condition: service_healthy       # tunggu namenode benar-benar siap
+    entrypoint: >
+      /bin/bash -c "
+        echo '[hdfs-init] Menunggu HDFS safe mode keluar...' &&
+        hdfs dfsadmin -safemode wait &&
+        echo '[hdfs-init] Membuat direktori /data/pangan...' &&
+        hdfs dfs -mkdir -p /data/pangan/api &&
+        hdfs dfs -mkdir -p /data/pangan/rss &&
+        hdfs dfs -mkdir -p /data/pangan/hasil &&
+        hdfs dfs -chmod -R 777 /data/pangan &&
+        echo '[hdfs-init] Selesai! Direktori HDFS siap.'
+      "
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hadoop_historyserver:
+
+networks:
+  bigdata-net:
+    name: bigdata-net
+    driver: bridge

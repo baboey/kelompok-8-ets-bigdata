@@ -1,0 +1,634 @@
+/*!
+ * HargaPangan Dashboard — style.css
+ * Dark monitoring theme dengan glassmorphism
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+/* ── CSS Variables ─────────────────────────────────────── */
+:root {
+  --bg-primary:    #0d1117;
+  --bg-secondary:  #161b22;
+  --bg-card:       rgba(22, 27, 34, 0.85);
+  --border:        rgba(255, 255, 255, 0.08);
+  --accent-green:  #3fb950;
+  --accent-red:    #f85149;
+  --accent-yellow: #d29922;
+  --accent-blue:   #58a6ff;
+  --accent-purple: #bc8cff;
+  --text-primary:  #e6edf3;
+  --text-muted:    #7d8590;
+  --text-dim:      #484f58;
+  --glow-green:    rgba(63, 185, 80, 0.15);
+  --glow-red:      rgba(248, 81, 73, 0.15);
+}
+
+/* ── Base Reset ────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+/* ── Background glow effect ────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(ellipse at 20% 20%, rgba(63,185,80,0.04) 0%, transparent 50%),
+              radial-gradient(ellipse at 80% 80%, rgba(88,166,255,0.04) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Header ─────────────────────────────────────────────── */
+header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(13, 17, 23, 0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 2rem;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.header-brand .logo {
+  font-size: 1.5rem;
+}
+
+.header-brand h1 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.header-brand p {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-green);
+  box-shadow: 0 0 8px var(--accent-green);
+  animation: pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+#last-update {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* ── Main Layout ────────────────────────────────────────── */
+main {
+  position: relative;
+  z-index: 1;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 1.5rem 2rem 3rem;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto;
+  gap: 1.25rem;
+}
+
+/* ── Card Base ──────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  backdrop-filter: blur(8px);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.card-title .icon { font-size: 1rem; }
+
+/* Full width cards */
+.card-full { grid-column: 1 / -1; }
+
+/* ── Harga Grid (Panel 1) ──────────────────────────────── */
+.harga-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.harga-item {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.875rem 1rem;
+  transition: all 0.3s ease;
+}
+
+.harga-item:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.harga-item.naik  { border-left: 3px solid var(--accent-green); }
+.harga-item.turun { border-left: 3px solid var(--accent-red);   }
+.harga-item.stabil { border-left: 3px solid var(--text-dim);    }
+
+.harga-nama {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.35rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.harga-nilai {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+
+.harga-change {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.harga-change.naik  { color: var(--accent-green); }
+.harga-change.turun { color: var(--accent-red);   }
+.harga-change.stabil { color: var(--text-muted);  }
+
+.harga-region {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  margin-top: 0.2rem;
+}
+
+/* Animasi update harga */
+@keyframes flash-green {
+  0%   { background: var(--glow-green); }
+  100% { background: rgba(255,255,255,0.03); }
+}
+
+@keyframes flash-red {
+  0%   { background: var(--glow-red); }
+  100% { background: rgba(255,255,255,0.03); }
+}
+
+.flash-naik  { animation: flash-green 1.2s ease; }
+.flash-turun { animation: flash-red   1.2s ease; }
+
+/* ── Chart Containers ───────────────────────────────────── */
+.chart-wrapper {
+  position: relative;
+  width: 100%;
+  height: 240px;
+}
+
+.chart-wrapper canvas {
+  max-height: 240px !important;
+}
+
+/* ── Volatilitas Badge ──────────────────────────────────── */
+.vol-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.vol-item {
+  display: grid;
+  grid-template-columns: 120px 1fr 60px;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.vol-name {
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vol-bar-track {
+  height: 6px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.vol-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+  transition: width 0.6s ease;
+}
+
+.vol-pct {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent-blue);
+  text-align: right;
+}
+
+/* ── Berita RSS ────────────────────────────────────────── */
+.news-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.news-list::-webkit-scrollbar { width: 4px; }
+.news-list::-webkit-scrollbar-track { background: transparent; }
+.news-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+.news-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.025);
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.news-item:hover {
+  background: rgba(255,255,255,0.05);
+  border-color: var(--border);
+}
+
+.news-title {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.news-meta {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.news-source {
+  color: var(--accent-blue);
+  font-weight: 500;
+}
+
+/* ── Korelasi Table ─────────────────────────────────────── */
+.table-wrapper {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+thead th {
+  text-align: left;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+tbody tr {
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  transition: background 0.15s ease;
+}
+
+tbody tr:hover { background: rgba(255,255,255,0.04); }
+
+tbody td {
+  padding: 0.6rem 0.75rem;
+  color: var(--text-primary);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.5rem;
+  border-radius: 99px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.badge-green { background: rgba(63,185,80,0.15);  color: var(--accent-green); }
+.badge-red   { background: rgba(248,81,73,0.15);   color: var(--accent-red);   }
+.badge-blue  { background: rgba(88,166,255,0.15);  color: var(--accent-blue);  }
+
+/* ── Card badge ─────────────────────────────────────────── */
+.card-badge {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.ml-badge {
+  background: rgba(188,140,255,0.15);
+  color: var(--accent-purple);
+  padding: 0.15rem 0.5rem;
+  border-radius: 99px;
+  font-weight: 600;
+}
+
+/* ── MLlib Tabs ──────────────────────────────────────────── */
+.ml-tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.75rem;
+  flex-wrap: wrap;
+}
+.ml-tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-family: inherit;
+  font-weight: 500;
+  padding: 0.4rem 0.9rem;
+  transition: all 0.2s ease;
+}
+.ml-tab:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+.ml-tab.active {
+  background: rgba(188,140,255,0.12);
+  border-color: var(--accent-purple);
+  color: var(--accent-purple);
+}
+.ml-tab-content { display: none; }
+.ml-tab-content.active { display: block; }
+
+/* ── MLlib Ringkasan Cards Grid ──────────────────────────── */
+.ml-ringkasan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.85rem;
+}
+.ml-card {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--accent);
+  border-radius: 10px;
+  padding: 1rem;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.ml-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.14); }
+
+.ml-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+.ml-card-emoji { font-size: 1.3rem; flex-shrink: 0; }
+.ml-card-name  { font-size: 0.82rem; font-weight: 600; color: var(--text-primary); line-height: 1.2; }
+.ml-card-n     { font-size: 0.65rem; color: var(--text-dim); }
+
+.ml-tren-badge {
+  margin-left: auto;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 99px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ml-tren-badge.naik  { background: rgba(63,185,80,0.15); color: var(--accent-green); }
+.ml-tren-badge.turun { background: rgba(248,81,73,0.15);  color: var(--accent-red);   }
+
+.ml-metrics-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.ml-metric {
+  background: rgba(255,255,255,0.03);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  text-align: center;
+}
+.ml-metric-val {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--accent-purple);
+  letter-spacing: -0.01em;
+}
+.ml-metric-lbl {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  margin-top: 0.1rem;
+}
+.ml-quality {
+  display: inline-block;
+  margin-left: 0.2rem;
+  font-size: 0.6rem;
+  opacity: 0.8;
+}
+
+.ml-coef-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+}
+.ml-coef-row b { color: var(--text-muted); }
+
+.ml-interpretasi {
+  padding: 0.5rem 0.65rem;
+  background: rgba(188,140,255,0.06);
+  border-left: 2px solid var(--accent-purple);
+  border-radius: 0 6px 6px 0;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── MLlib Table badges extra ────────────────────────────── */
+.badge-yellow { background: rgba(210,153,34,0.15); color: var(--accent-yellow); }
+.badge-gray   { background: rgba(127,132,144,0.15); color: var(--text-muted); }
+
+/* ── MLlib Prediksi Grid ─────────────────────────────────── */
+.ml-prediksi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.85rem;
+}
+.ml-pred-card {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.ml-pred-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  padding: 0.6rem 0.85rem;
+  border-bottom: 2px solid;
+  background: rgba(255,255,255,0.02);
+}
+.ml-pred-steps { padding: 0.5rem 0.85rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.ml-pred-step {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.ml-step-label { color: var(--text-dim); }
+.ml-step-val   { font-weight: 600; font-size: 0.8rem; }
+
+/* ── Loading State ──────────────────────────────────────── */
+.loading-text {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  text-align: center;
+  padding: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* ── Animations ─────────────────────────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.card { animation: fadeInUp 0.4s ease both; }
+.card:nth-child(2) { animation-delay: 0.05s; }
+.card:nth-child(3) { animation-delay: 0.10s; }
+.card:nth-child(4) { animation-delay: 0.15s; }
+.card:nth-child(5) { animation-delay: 0.20s; }
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  .harga-grid          { grid-template-columns: repeat(2, 1fr); }
+  .ml-ringkasan-grid   { grid-template-columns: repeat(2, 1fr); }
+  .ml-prediksi-grid    { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 768px) {
+  main                 { grid-template-columns: 1fr; padding: 1rem; }
+  .card-full           { grid-column: 1; }
+  .harga-grid          { grid-template-columns: repeat(2, 1fr); }
+  .ml-ringkasan-grid   { grid-template-columns: repeat(2, 1fr); }
+  .ml-prediksi-grid    { grid-template-columns: repeat(2, 1fr); }
+  header               { padding: 0 1rem; }
+  .header-right        { gap: 0.75rem; }
+  .ml-tabs             { gap: 0.35rem; }
+  .ml-tab              { font-size: 0.72rem; padding: 0.35rem 0.65rem; }
+}
+
+@media (max-width: 480px) {
+  .harga-grid          { grid-template-columns: 1fr 1fr; }
+  .ml-ringkasan-grid   { grid-template-columns: 1fr; }
+  .ml-prediksi-grid    { grid-template-columns: 1fr; }
+  .vol-item            { grid-template-columns: 90px 1fr 50px; }
+}
