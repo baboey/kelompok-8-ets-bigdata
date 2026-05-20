@@ -233,15 +233,22 @@ Dashboard membaca data yang diperbarui secara otomatis setiap 30 detik.
 
 ### HDFS Web UI (localhost:9870)
 
-> *(Tambahkan screenshot HDFS Web UI yang menampilkan file JSON di /data/pangan/api/ dan /data/pangan/rss/)*
+> ![hdfs](https://github.com/baboey/kelompok-8-ets-bigdata/blob/main/images/hadoop.jpeg)
 
 ### Kafka Consumer Output
 
-> *(Tambahkan screenshot terminal consumer_to_hdfs.py yang menampilkan event masuk dari kedua topic)*
+> ![kafka](https://github.com/baboey/kelompok-8-ets-bigdata/blob/main/images/kafka.jpeg)
 
 ### Dashboard (localhost:5000)
 
-> *(Tambahkan screenshot dashboard berjalan dengan data nyata dari Spark dan Kafka)*
+> ![ya](https://github.com/baboey/kelompok-8-ets-bigdata/blob/main/images/WhatsApp%20Image%202026-05-20%20at%2013.14.51%20(1).jpeg)
+> ![yi](https://github.com/baboey/kelompok-8-ets-bigdata/blob/main/images/WhatsApp%20Image%202026-05-20%20at%2013.14.52%20(1).jpeg)
+> ![yu](https://github.com/baboey/kelompok-8-ets-bigdata/blob/main/images/WhatsApp%20Image%202026-05-20%20at%2013.14.52.jpeg)
+ 
+### Isi HDFS:
+> ![api](https://github.com/baboey/kelompok-8-ets-bigdata/blob/main/images/api.jpeg)
+> ![hasil](https://github.com/baboey/kelompok-8-ets-bigdata/blob/main/images/hasil-hdfs.jpeg)
+> <img width="1203" height="429" alt="WhatsApp Image 2026-05-20 at 13 14 50 (4)" src="https://github.com/user-attachments/assets/674bc936-d0e4-4ef4-8c4d-46c4e5fa01a0" />
 
 ---
 
